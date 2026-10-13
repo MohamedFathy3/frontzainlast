@@ -49,6 +49,7 @@ interface PurchaseInvoice {
 }
 
 interface ReturnItem {
+  line_key: string;
   product_id: number;
   product_name: string;
   max_quantity: number;
@@ -130,7 +131,8 @@ const PurchaseReturnForm: React.FC<PurchaseReturnFormProps> = ({
   // Update items when invoice data loads
   useEffect(() => {
     if (invoice?.items) {
-      setItems(invoice.items.map(item => ({
+      setItems(invoice.items.map((item, index) => ({
+        line_key: `${item.product_id}:${item.product_unit_id ?? 'none'}:${item.color_id ?? 'none'}:${index}`,
         product_id: item.product_id,
         product_name: language === 'ar' ? (item.product_name_ar || item.product_name) : item.product_name,
         max_quantity: item.quantity,
@@ -152,9 +154,9 @@ const PurchaseReturnForm: React.FC<PurchaseReturnFormProps> = ({
     }
   }, [invoice, language]);
 
-  const updateItemQuantity = (productId: number, quantity: number) => {
+  const updateItemQuantity = (lineKey: string, quantity: number) => {
     setItems(prev => prev.map(item =>
-      item.product_id === productId
+      item.line_key === lineKey
         ? { ...item, quantity: Math.min(quantity, item.max_quantity) }
         : item
     ));
@@ -420,7 +422,7 @@ const PurchaseReturnForm: React.FC<PurchaseReturnFormProps> = ({
                       </TableHeader>
                       <TableBody>
                         {items.map((item) => (
-                          <TableRow key={item.product_id}>
+                          <TableRow key={item.line_key}>
                             <TableCell className="font-medium">{item.product_name}</TableCell>
                             <TableCell className="text-center">{item.unit_name || '-'}</TableCell>
                             <TableCell className="text-center">{item.color_name || '-'}</TableCell>
@@ -431,7 +433,7 @@ const PurchaseReturnForm: React.FC<PurchaseReturnFormProps> = ({
                                 min="0"
                                 max={item.max_quantity}
                                 value={item.quantity}
-                                onChange={(e) => updateItemQuantity(item.product_id, parseInt(e.target.value) || 0)}
+                                onChange={(e) => updateItemQuantity(item.line_key, parseInt(e.target.value) || 0)}
                                 className="w-20 text-center mx-auto h-8"
                               />
                             </TableCell>

@@ -308,34 +308,24 @@ const POS: React.FC = () => {
 
       for (const order of unsyncedOrders) {
         try {
-          const response = await fetch('/api/invoice/store', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Accept': 'application/json',
-            },
-            body: JSON.stringify({
+          await api.post('/invoice/store', {
               customer_id: parseInt(order.customer_id || '1'),
               items: order.items.map((item: any) => ({
                 product_id: parseInt(item.id),
                 quantity: item.quantity,
                 price: item.price,
                 color: item.colorName || null,
-                size: item.sizeName || null
+                size: item.sizeName || null,
+                unit_id: item.unitId || null,
+                color_id: item.colorId || null
               })),
               payments: order.payments || [],
               subtotal: order.subtotal,
               tax: order.tax,
               total: order.total,
-            })
           });
-
-          if (response.ok) {
-            await markOrderSynced(order.id);
-            successCount++;
-          } else {
-            failCount++;
-          }
+          await markOrderSynced(order.id);
+          successCount++;
         } catch (error) {
           failCount++;
         }

@@ -35,21 +35,58 @@ import {
 // ========== أنواع البيانات ==========
 
 interface ReturnItem {
-  product: string;
+  sales_invoice_item_id?: number | null;
+  product_id?: number;
+  product_name?: string | null;
+  product_code?: string | null;
+  product_sku?: string | null;
+  product?: string | { id: number; name: string };
+  product_unit_id?: number | null;
+  unit_name?: string | null;
+  color_id?: number | null;
+  color_name?: string | null;
+  color_code?: string | null;
   quantity: number;
-  price: string;
-  total: string;
-  reason: string;
+  price: string | number;
+  original_total?: string | number;
+  discount_percentage?: string | number;
+  discount_amount?: string | number;
+  tax_percentage?: string | number;
+  tax_amount?: string | number;
+  total: string | number;
+  reason?: string | null;
+  reason_label?: string | null;
 }
 
 interface SalesReturn {
   id: number;
   return_number: string;
+  sales_invoice_id?: number;
   invoice_number: string;
-  customer: string;
+  customer: string | null;
+  customer_id?: number | null;
+  customer_name?: string | null;
+  customer_points?: number;
+  customer_level?: string;
+  treasury_id?: number | null;
+  treasury_name?: string | null;
+  treasury_balance?: string | number | null;
+  cashier_id?: number | null;
+  cashier_name?: string | null;
+  shift_id?: number | null;
+  shift_number?: number | null;
   return_method: string;
-  total_amount: string;
+  return_method_label?: string;
+  total_amount: string | number;
+  currency_code?: string | null;
+  currency_name?: string | null;
   note: string | null;
+  is_direct?: boolean | null;
+  statistics?: {
+    items_count: number;
+    total_quantity: number;
+    total_amount: string | number;
+  };
   items: ReturnItem[];
   created_at: string;
 }
@@ -193,8 +230,8 @@ const SalesReturns = () => {
   };
 
   // ========== تنسيق العملة ==========
-  const formatCurrency = (amount: string) => {
-    return Number(amount).toLocaleString() + ' YER';
+  const formatCurrency = (amount: string | number, currency = 'YER') => {
+    return `${Number(amount || 0).toLocaleString()} ${currency}`;
   };
 
   // ========== Pagination Handlers ==========
@@ -471,7 +508,7 @@ const SalesReturns = () => {
                           <TableCell>
                             <div className="flex items-center gap-2">
                               <User size={14} className="text-muted-foreground" />
-                              {ret.customer || '-'}
+                              {ret.customer || ret.customer_name || '-'}
                             </div>
                           </TableCell>
                           <TableCell className="text-center">
@@ -514,7 +551,7 @@ const SalesReturns = () => {
 
       {/* ========== Modal عرض التفاصيل ========== */}
       <Dialog open={showDetails} onOpenChange={setShowDetails}>
-        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+        <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-xl">
               <RotateCcw className="text-primary" size={24} />
@@ -528,7 +565,16 @@ const SalesReturns = () => {
           {selectedReturn && (
             <div className="space-y-4">
               {/* معلومات أساسية */}
-              <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+              <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-4">
+                <Card>
+                  <CardContent className="pt-4">
+                    <div className="text-sm text-muted-foreground flex items-center gap-1">
+                      <Hash className="h-3 w-3" />
+                      {language === 'ar' ? 'رقم المرتجع' : 'Return Number'}
+                    </div>
+                    <div className="font-medium font-mono">{selectedReturn.return_number || '-'}</div>
+                  </CardContent>
+                </Card>
                 <Card>
                   <CardContent className="pt-4">
                     <div className="text-sm text-muted-foreground flex items-center gap-1">
@@ -584,7 +630,7 @@ const SalesReturns = () => {
                       {language === 'ar' ? 'الإجمالي' : 'Total'}
                     </div>
                     <div className="font-bold text-lg text-primary">
-                      {formatCurrency(selectedReturn.total_amount)}
+                      {formatCurrency(selectedReturn.total_amount, selectedReturn.currency_code || 'YER')}
                     </div>
                   </CardContent>
                 </Card>
@@ -593,10 +639,62 @@ const SalesReturns = () => {
                   <CardContent className="pt-4">
                     <div className="text-sm text-muted-foreground flex items-center gap-1">
                       <Package className="h-3 w-3" />
-                      {language === 'ar' ? 'عدد الأصناف' : 'Items'}
+                      {language === 'ar' ? 'عدد القطع' : 'Quantity'}
                     </div>
                     <div className="font-medium text-lg">
-                      {selectedReturn.items?.length || 0}
+                      {selectedReturn.statistics?.total_quantity ?? selectedReturn.items?.reduce((sum, item) => sum + Number(item.quantity || 0), 0) ?? 0}
+                    </div>
+                    {selectedReturn.statistics?.items_count != null && (
+                      <div className="text-xs text-muted-foreground">
+                        {language === 'ar' ? 'عدد الأصناف' : 'Distinct items'}: {selectedReturn.statistics.items_count}
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+                <Card>
+                  <CardContent className="pt-4">
+                    <div className="text-sm text-muted-foreground flex items-center gap-1">
+                      <DollarSign className="h-3 w-3" />
+                      {language === 'ar' ? 'الخزينة' : 'Treasury'}
+                    </div>
+                    <div className="font-medium">{selectedReturn.treasury_name || '-'}</div>
+                    {selectedReturn.treasury_balance != null && (
+                      <div className="text-xs text-muted-foreground">
+                        {language === 'ar' ? 'الرصيد الحالي' : 'Current balance'}: {formatCurrency(selectedReturn.treasury_balance, selectedReturn.currency_code || 'YER')}
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+                <Card>
+                  <CardContent className="pt-4">
+                    <div className="text-sm text-muted-foreground">
+                      {language === 'ar' ? 'نوع المرتجع' : 'Return type'}
+                    </div>
+                    <div className="font-medium">
+                      {selectedReturn.is_direct
+                        ? (language === 'ar' ? 'مرتجع مباشر' : 'Direct return')
+                        : (language === 'ar' ? 'مرتبط بفاتورة' : 'Invoice return')}
+                    </div>
+                  </CardContent>
+                </Card>
+                <Card>
+                  <CardContent className="pt-4">
+                    <div className="text-sm text-muted-foreground">
+                      {language === 'ar' ? 'الكاشير / الوردية' : 'Cashier / Shift'}
+                    </div>
+                    <div className="font-medium">
+                      {selectedReturn.cashier_name || '-'}
+                      {selectedReturn.shift_number ? ` / ${selectedReturn.shift_number}` : ''}
+                    </div>
+                  </CardContent>
+                </Card>
+                <Card>
+                  <CardContent className="pt-4">
+                    <div className="text-sm text-muted-foreground">
+                      {language === 'ar' ? 'نقاط العميل / المستوى' : 'Customer points / tier'}
+                    </div>
+                    <div className="font-medium">
+                      {selectedReturn.customer_points ?? 0} / {selectedReturn.customer_level || 'bronze'}
                     </div>
                   </CardContent>
                 </Card>
@@ -623,31 +721,75 @@ const SalesReturns = () => {
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <div className="border rounded-lg overflow-hidden">
-                    <Table>
+                  <div className="border rounded-lg overflow-x-auto">
+                    <Table className="min-w-[1100px]">
                       <TableHeader>
                         <TableRow className="bg-muted/50">
                           <TableHead className="w-16">#</TableHead>
                           <TableHead>{language === 'ar' ? 'المنتج' : 'Product'}</TableHead>
+                          <TableHead>{language === 'ar' ? 'المقاس' : 'Size'}</TableHead>
+                          <TableHead>{language === 'ar' ? 'اللون' : 'Color'}</TableHead>
                           <TableHead className="text-center">{language === 'ar' ? 'الكمية' : 'Qty'}</TableHead>
                           <TableHead className="text-right">{language === 'ar' ? 'السعر' : 'Price'}</TableHead>
+                          <TableHead className="text-right">{language === 'ar' ? 'الإجمالي قبل الخصم' : 'Subtotal'}</TableHead>
+                          <TableHead className="text-right">{language === 'ar' ? 'الخصم' : 'Discount'}</TableHead>
+                          <TableHead className="text-right">{language === 'ar' ? 'الضريبة' : 'Tax'}</TableHead>
                           <TableHead className="text-right">{language === 'ar' ? 'الإجمالي' : 'Total'}</TableHead>
                           <TableHead>{language === 'ar' ? 'سبب الإرجاع' : 'Reason'}</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {selectedReturn.items?.map((item, idx) => (
-                          <TableRow key={idx}>
-                            <TableCell className="text-muted-foreground">{idx + 1}</TableCell>
-                            <TableCell className="font-medium">{item.product}</TableCell>
-                            <TableCell className="text-center">{item.quantity}</TableCell>
-                            <TableCell className="text-right">{formatCurrency(item.price)}</TableCell>
-                            <TableCell className="text-right font-semibold">{formatCurrency(item.total)}</TableCell>
-                            <TableCell className="max-w-[200px]">
-                              <span className="text-sm">{item.reason}</span>
-                            </TableCell>
-                          </TableRow>
-                        ))}
+                        {selectedReturn.items?.map((item, idx) => {
+                          const productName = item.product_name
+                            || (typeof item.product === 'string' ? item.product : item.product?.name)
+                            || '-';
+                          const currency = selectedReturn.currency_code || 'YER';
+                          return (
+                            <TableRow key={item.sales_invoice_item_id || `${item.product_id || productName}-${idx}`}>
+                              <TableCell className="text-muted-foreground">{idx + 1}</TableCell>
+                              <TableCell className="font-medium">
+                                <div>{productName}</div>
+                                {(item.product_sku || item.product_code) && (
+                                  <div className="text-xs text-muted-foreground">
+                                    {item.product_sku || item.product_code}
+                                  </div>
+                                )}
+                              </TableCell>
+                              <TableCell>{item.unit_name || '-'}</TableCell>
+                              <TableCell>
+                                {item.color_name ? (
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-sm">{item.color_name}</span>
+                                    {item.color_code && <span className="text-xs text-muted-foreground">({item.color_code})</span>}
+                                  </div>
+                                ) : '-'}
+                              </TableCell>
+                              <TableCell className="text-center">{item.quantity}</TableCell>
+                              <TableCell className="text-right">{formatCurrency(item.price, currency)}</TableCell>
+                              <TableCell className="text-right">
+                                {formatCurrency(item.original_total ?? Number(item.price) * Number(item.quantity), currency)}
+                              </TableCell>
+                              <TableCell className="text-right">
+                                {formatCurrency(item.discount_amount || 0, currency)}
+                                {Number(item.discount_percentage || 0) > 0 && (
+                                  <div className="text-xs text-muted-foreground">{item.discount_percentage}%</div>
+                                )}
+                              </TableCell>
+                              <TableCell className="text-right">
+                                {formatCurrency(item.tax_amount || 0, currency)}
+                                {Number(item.tax_percentage || 0) > 0 && (
+                                  <div className="text-xs text-muted-foreground">{item.tax_percentage}%</div>
+                                )}
+                              </TableCell>
+                              <TableCell className="text-right font-semibold">
+                                {formatCurrency(item.total, currency)}
+                              </TableCell>
+                              <TableCell className="max-w-[200px]">
+                                <span className="text-sm">{item.reason_label || item.reason || '-'}</span>
+                              </TableCell>
+                            </TableRow>
+                          );
+                        })}
                       </TableBody>
                     </Table>
                   </div>

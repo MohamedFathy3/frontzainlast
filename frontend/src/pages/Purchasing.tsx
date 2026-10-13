@@ -264,6 +264,15 @@ const Purchasing = () => {
     queryFn: () => supplierService.getSuppliers(supplierFilters),
   });
 
+  const {
+    data: totalPayables,
+    isLoading: payablesLoading,
+    isError: payablesError,
+  } = useQuery({
+    queryKey: ['purchase-invoice-payables'],
+    queryFn: () => purchaseInvoiceService.getPayables(),
+  });
+
   // ========== جلب أوامر الشراء ==========
   const { data: purchaseOrdersResponse } = useQuery<PurchaseOrdersResponse>({
     queryKey: ['purchase_orders_stats'],
@@ -298,7 +307,6 @@ const Purchasing = () => {
   const purchaseReturnsCount = purchaseReturnsResponse?.meta?.total || purchaseReturnsResponse?.data?.length || 0;
 
   // ========== حساب الإحصائيات ==========
-  const totalBalance = suppliers.reduce((sum: number, s: Supplier) => sum + Number(s.credit_limit || 0), 0);
   const totalPurchaseValue = invoicesList.reduce((sum: number, inv: InvoiceTableRow) => sum + Number(inv.total_amount || 0), 0);
 
   const stats = [
@@ -322,7 +330,11 @@ const Purchasing = () => {
     },
     {
       label: language === 'ar' ? 'المستحق للموردين' : 'Payables',
-      value: `${totalBalance.toLocaleString()} YER`,
+      value: payablesLoading
+        ? '...'
+        : payablesError
+          ? (language === 'ar' ? 'تعذر التحميل' : 'Unavailable')
+          : `${Number(totalPayables || 0).toLocaleString()} YER`,
       icon: <Wallet className="text-destructive" size={24} />,
       color: 'bg-destructive/10'
     },
@@ -335,6 +347,7 @@ const Purchasing = () => {
     queryClient.invalidateQueries({ queryKey: ['purchase_orders_stats'] });
     queryClient.invalidateQueries({ queryKey: ['purchase-returns'] });
     queryClient.invalidateQueries({ queryKey: ['purchase-invoices'] });
+    queryClient.invalidateQueries({ queryKey: ['purchase-invoice-payables'] });
 
   };
 

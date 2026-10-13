@@ -14,6 +14,7 @@ interface Product {
   name: string;
   name_ar: string | null;
   price: number;
+  stock?: number;
   sku: string;
   image_url?: string | null;
   imageUrl?: string | null;
@@ -107,13 +108,14 @@ const POSVariantSelector: React.FC<POSVariantSelectorProps> = ({
     const unit = product.units.find(u => u.unit_name === selectedSize);
     if (!unit) return null;
     
-    // ✅ لو مختارش لون، نستخدم أول لون (أو نستخدم بيانات بدون لون)
+    // Products with tracked colors require choosing the exact color.
     if (!selectedColor) {
+      if (unit.colors.length > 0) return null;
       return {
         unitId: unit.unit_id,
-        colorId: unit.colors[0]?.color_id || 0,
+        colorId: 0,
         price: parseFloat(unit.sell_price || '0'),
-        stock: unit.colors.reduce((sum, color) => sum + color.stock, 0), // مجموع المخزون لكل الألوان
+        stock: Number(product.stock) || 0,
         sku: unit.barcode || product.sku
       };
     }
@@ -282,30 +284,13 @@ const POSVariantSelector: React.FC<POSVariantSelectorProps> = ({
             </div>
           </div>
 
-          {/* Color Selection - اختياري - يظهر فقط لو اختار مقاس */}
+          {/* Color Selection - required for products that track colors */}
           {selectedSize && availableColors.length > 0 && (
             <div className="mb-6">
               <h3 className="text-sm font-semibold mb-3 flex items-center gap-2">
                 <span className="w-1.5 h-5 bg-primary rounded-full" />
-                {t.colors} <span className="text-xs text-muted-foreground">({t.optional})</span>
+                {t.colors} <span className="text-xs text-destructive">({language === 'ar' ? 'مطلوب' : 'Required'})</span>
               </h3>
-              
-              {/* خيار "بدون لون" */}
-              <div className="mb-3">
-                <button
-                  onClick={() => setSelectedColor('')}
-                  className={cn(
-                    'p-2 rounded-lg border-2 transition-all text-center w-full',
-                    selectedColor === ''
-                      ? 'border-primary bg-primary/10'
-                      : 'border-border hover:border-primary/50'
-                  )}
-                >
-                  <span className="font-medium text-sm">
-                    {language === 'ar' ? 'بدون لون' : 'No Color'}
-                  </span>
-                </button>
-              </div>
 
               {/* ألوان المنتج */}
               <div className="grid grid-cols-4 sm:grid-cols-5 md:grid-cols-6 gap-3">
@@ -385,6 +370,7 @@ const POSVariantSelector: React.FC<POSVariantSelectorProps> = ({
           {selectedSize ? (
             <Button 
               onClick={handleAddToCart}
+              disabled={!selectedVariantDetails}
               className="w-full h-12 text-base gap-2"
             >
               <ShoppingCart size={20} />

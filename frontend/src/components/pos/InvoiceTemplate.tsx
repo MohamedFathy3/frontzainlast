@@ -48,6 +48,7 @@ interface InvoiceTemplateProps {
     totalDiscountPercentage?: number;
     totalDiscountAmount?: number;
     invoiceDiscountPercentage?: number;
+    loyaltyDiscountAmount?: number;
   };
   companyInfo: CompanyInfo;
 }
@@ -114,6 +115,7 @@ const InvoiceTemplate = forwardRef<HTMLDivElement, InvoiceTemplateProps>(
       totalDiscountPercentage: invoiceData.totalDiscountPercentage || 0,
       totalDiscountAmount: invoiceData.totalDiscountAmount || 0,
       invoiceDiscountPercentage: invoiceData.invoiceDiscountPercentage || 0,
+      loyaltyDiscountAmount: invoiceData.loyaltyDiscountAmount || 0,
     };
 
     const texts = {
@@ -123,6 +125,8 @@ const InvoiceTemplate = forwardRef<HTMLDivElement, InvoiceTemplateProps>(
       paymentMethod: isRTL ? 'طريقة الدفع' : 'Payment',
       cash: isRTL ? 'نقدي' : 'Cash',
       card: isRTL ? 'شبكة' : 'Card',
+      wallet: isRTL ? 'محفظة' : 'Wallet',
+      loyaltyPoints: isRTL ? 'تم الدفع بنقاط الولاء' : 'Paid with loyalty points',
       customer: isRTL ? 'العميل' : 'Customer',
       cashier: isRTL ? 'الكاشير' : 'Cashier',
       branch: isRTL ? 'الفرع' : 'Branch',
@@ -142,12 +146,16 @@ const InvoiceTemplate = forwardRef<HTMLDivElement, InvoiceTemplateProps>(
       thankYou: isRTL ? 'شكراً لتعاملكم معنا' : 'Thank you for your business',
       poweredBy: isRTL ? 'تم بواسطة Zain ERP' : 'Powered by Zain ERP',
       totalDiscount: isRTL ? 'خصم إجمالي' : 'Total Discount',
+      loyaltyDiscount: isRTL ? 'خصم نقاط الولاء' : 'Loyalty points discount',
+      amountAfterPoints: isRTL ? 'المطلوب بعد خصم النقاط' : 'Due after points',
     };
 
     const getPaymentMethodText = (method: string) => {
       switch (method.toLowerCase()) {
         case 'cash': return texts.cash;
         case 'card': return texts.card;
+        case 'wallet': return texts.wallet;
+        case 'loyalty_points': return texts.loyaltyPoints;
         default: return method;
       }
     };
@@ -324,6 +332,13 @@ const InvoiceTemplate = forwardRef<HTMLDivElement, InvoiceTemplateProps>(
                 <span>-{formatCurrency(safeInvoiceData.totalDiscountAmount)}</span>
               </div>
             )}
+
+            {safeInvoiceData.loyaltyDiscountAmount > 0 && (
+              <div className="flex justify-between py-0.5 text-green-600 font-semibold">
+                <span>{texts.loyaltyDiscount}:</span>
+                <span>-{formatCurrency(safeInvoiceData.loyaltyDiscountAmount)}</span>
+              </div>
+            )}
             
             <div className="flex justify-between py-0.5">
               <span>{texts.tax}:</span>
@@ -334,6 +349,12 @@ const InvoiceTemplate = forwardRef<HTMLDivElement, InvoiceTemplateProps>(
               <span>{texts.grandTotal}:</span>
               <span>{formatCurrency(safeInvoiceData.total)}</span>
             </div>
+            {safeInvoiceData.loyaltyDiscountAmount > 0 && (
+              <div className="flex justify-between py-0.5 font-semibold">
+                <span>{texts.amountAfterPoints}:</span>
+                <span>{formatCurrency(Math.max(0, safeInvoiceData.total - safeInvoiceData.loyaltyDiscountAmount))}</span>
+              </div>
+            )}
           </div>
         </div>
 

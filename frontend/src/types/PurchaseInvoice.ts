@@ -52,6 +52,10 @@ export interface PurchaseInvoiceItem {
   product_name: string;
   product_name_ar?: string;
   product_sku?: string;
+  product_unit_id?: number | null;
+  unit_name?: string | null;
+  color_id?: number | null;
+  color_name?: string | null;
   quantity: number;
   price: number;
   discount: number;
@@ -89,7 +93,18 @@ export interface PurchaseInvoice {
   tax_total: number;
   total_amount: number;
   paid_amount: number;
+  returned_amount?: number;
   remaining_amount: number;
+  branch_name?: string | null;
+  warehouse_name?: string | null;
+  treasury_name?: string | null;
+  payment_history?: Array<{
+    id: number;
+    amount: number;
+    treasury_name: string | null;
+    description: string | null;
+    payment_date: string;
+  }>;
   items: PurchaseInvoiceItem[];
   created_at: string;
   updated_at: string;
@@ -119,7 +134,8 @@ export interface PurchaseInvoicesResponse {
 
 export interface PaymentPayload {
     amount: number;
-    payment_method?: string;
+    payment_method: 'cash';
+    treasury_id: number;
     reference_number?: string;
     notes?: string;
     payment_date?: string;

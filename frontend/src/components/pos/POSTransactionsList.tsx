@@ -95,7 +95,7 @@ interface Sale {
 // ✅ تحديث واجهة ReturnItem
 interface ReturnItem {
   id: number;
-  product_id: number;
+  product_id?: number;
   product?: {
     id: number;
     name: string;
@@ -115,11 +115,11 @@ interface ReturnItem {
 interface ReturnInvoice {
   id: number;
   return_number: string;
-  return_date: string;
+  return_date?: string;
   total_amount: number;
   refunded_amount: number;
   reason: string | null;
-  status: 'completed' | 'pending' | 'cancelled';
+  status?: 'completed' | 'pending' | 'cancelled';
   customer_id: number | null;
   customer?: Customer;
   invoice?: {
@@ -229,6 +229,7 @@ const POSTransactionsList: React.FC<POSTransactionsListProps> = ({ onClose }) =>
     noData: language === 'ar' ? 'لا توجد بيانات' : 'No data found',
     totalSales: language === 'ar' ? 'إجمالي المبيعات' : 'Total Sales',
     totalReturns: language === 'ar' ? 'إجمالي المرتجعات' : 'Total Returns',
+    refundedTotal: language === 'ar' ? 'المبلغ المصروف للعملاء' : 'Refunded to Customers',
     viewDetails: language === 'ar' ? 'عرض التفاصيل' : 'View Details',
     print: language === 'ar' ? 'طباعة' : 'Print',
     paid_status: language === 'ar' ? 'مدفوع' : 'Paid',
@@ -239,6 +240,7 @@ const POSTransactionsList: React.FC<POSTransactionsListProps> = ({ onClose }) =>
     card: language === 'ar' ? 'بطاقة' : 'Card',
     wallet: language === 'ar' ? 'محفظة' : 'Wallet',
     credit: language === 'ar' ? 'رصيد' : 'Credit',
+    bank: language === 'ar' ? 'تحويل بنكي' : 'Bank Transfer',
     invoiceDetails: language === 'ar' ? 'تفاصيل الفاتورة' : 'Invoice Details',
     returnDetails: language === 'ar' ? 'تفاصيل المرتجع' : 'Return Details',
     items: language === 'ar' ? 'الأصناف' : 'Items',
@@ -314,14 +316,22 @@ const POSTransactionsList: React.FC<POSTransactionsListProps> = ({ onClose }) =>
             // إذا كان فيه فاتورة أصلية وعندها items
             if (ret.invoice && ret.invoice.items && ret.items) {
               // إنشاء map للعناصر في الفاتورة الأصلية
-              const invoiceItemsMap = new Map();
+              const invoiceItemsMap = new Map<number, any[]>();
               ret.invoice.items.forEach((invItem: any) => {
-                invoiceItemsMap.set(invItem.product_id, invItem);
+                const productItems = invoiceItemsMap.get(Number(invItem.product_id)) || [];
+                productItems.push(invItem);
+                invoiceItemsMap.set(Number(invItem.product_id), productItems);
               });
               
               // إضافة اللون والمقاس من الفاتورة الأصلية
               const enrichedItems = ret.items.map((item: ReturnItem) => {
-                const invoiceItem = invoiceItemsMap.get(item.product_id);
+                const productId = Number(item.product_id ?? item.product?.id);
+                const matchingItems = invoiceItemsMap.get(productId) || [];
+                const exactVariant = matchingItems.find((invoiceItem: any) =>
+                  (!item.color || invoiceItem.color === item.color) &&
+                  (!item.size || invoiceItem.size === item.size)
+                );
+                const invoiceItem = exactVariant || (matchingItems.length === 1 ? matchingItems[0] : null);
                 return {
                   ...item,
                   color: invoiceItem?.color || item.color || null,
@@ -407,10 +417,11 @@ const POSTransactionsList: React.FC<POSTransactionsListProps> = ({ onClose }) =>
   const filterReturns = (ret: ReturnInvoice) => {
     if (searchTerm) {
       const searchLower = searchTerm.toLowerCase();
-      const matchesInvoice = ret.return_number?.toLowerCase().includes(searchLower);
+      const matchesReturn = ret.return_number?.toLowerCase().includes(searchLower);
+      const matchesInvoice = ret.invoice?.invoice_number?.toLowerCase().includes(searchLower);
       const customerName = ret.invoice?.customer?.name || ret.customer?.name || '';
       const matchesCustomer = customerName.toLowerCase().includes(searchLower);
-      if (!matchesInvoice && !matchesCustomer) return false;
+      if (!matchesReturn && !matchesInvoice && !matchesCustomer) return false;
     }
 
     if (dateFrom || dateTo) {
@@ -430,7 +441,12 @@ const POSTransactionsList: React.FC<POSTransactionsListProps> = ({ onClose }) =>
       }
     }
 
-    if (selectedStatus !== 'all' && ret.status !== selectedStatus) return false;
+    if (selectedPaymentMethod !== 'all') {
+      const matchesMethod = selectedPaymentMethod === 'bank'
+        ? ['bank', 'bank_transfer'].includes(ret.refund_method)
+        : ret.refund_method === selectedPaymentMethod;
+      if (!matchesMethod) return false;
+    }
 
     return true;
   };
@@ -466,7 +482,10 @@ const POSTransactionsList: React.FC<POSTransactionsListProps> = ({ onClose }) =>
   const formatNumber = (value: string | number, decimals: number = 2): string => {
     const num = typeof value === 'string' ? parseFloat(value) : value;
     if (isNaN(num)) return '0.00';
-    return num.toFixed(decimals).toLocaleString();
+    return num.toLocaleString(undefined, {
+      minimumFractionDigits: decimals,
+      maximumFractionDigits: decimals,
+    });
   };
 
   const getPaymentIcon = (method: string) => {
@@ -483,6 +502,8 @@ const POSTransactionsList: React.FC<POSTransactionsListProps> = ({ onClose }) =>
       case 'cash': return 'bg-green-500/10 text-green-600 border-green-200';
       case 'card': return 'bg-blue-500/10 text-blue-600 border-blue-200';
       case 'wallet': return 'bg-purple-500/10 text-purple-600 border-purple-200';
+      case 'bank':
+      case 'bank_transfer': return 'bg-indigo-500/10 text-indigo-600 border-indigo-200';
       case 'credit': return 'bg-orange-500/10 text-orange-600 border-orange-200';
       default: return 'bg-gray-500/10 text-gray-600 border-gray-200';
     }
@@ -507,7 +528,8 @@ const POSTransactionsList: React.FC<POSTransactionsListProps> = ({ onClose }) =>
         {method === 'cash' ? t.cash : 
          method === 'card' ? t.card : 
          method === 'wallet' ? t.wallet : 
-         method === 'credit' ? t.credit : method}
+         method === 'credit' ? t.credit :
+         ['bank', 'bank_transfer'].includes(method) ? t.bank : method}
       </Badge>
     );
   };
@@ -647,6 +669,12 @@ const POSTransactionsList: React.FC<POSTransactionsListProps> = ({ onClose }) =>
               <div>
                 <p className="text-xl font-bold">{formatNumber(totalReturnsAmount)}</p>
                 <p className="text-xs text-muted-foreground">{t.totalReturns}</p>
+                <p className="text-xs text-muted-foreground">
+                  {t.refundedTotal}: {formatNumber(filteredReturns.reduce(
+                    (sum: number, item: ReturnInvoice) => sum + Number(item.refunded_amount || 0),
+                    0
+                  ))}
+                </p>
               </div>
             </div>
           </CardContent>
@@ -760,11 +788,13 @@ const POSTransactionsList: React.FC<POSTransactionsListProps> = ({ onClose }) =>
                     <SelectItem value="cash">{t.cash}</SelectItem>
                     <SelectItem value="card">{t.card}</SelectItem>
                     <SelectItem value="wallet">{t.wallet}</SelectItem>
-                    <SelectItem value="credit">{t.credit}</SelectItem>
+                    {activeTab === 'sales'
+                      ? <SelectItem value="credit">{t.credit}</SelectItem>
+                      : <SelectItem value="bank">{t.bank}</SelectItem>}
                   </SelectContent>
                 </Select>
               </div>
-              <div className="space-y-1.5">
+              {activeTab === 'sales' && <div className="space-y-1.5">
                 <Label className="text-xs font-medium text-muted-foreground">{t.status}</Label>
                 <Select value={selectedStatus} onValueChange={setSelectedStatus}>
                   <SelectTrigger>
@@ -778,14 +808,18 @@ const POSTransactionsList: React.FC<POSTransactionsListProps> = ({ onClose }) =>
                     <SelectItem value="cancelled">{t.cancelled}</SelectItem>
                   </SelectContent>
                 </Select>
-              </div>
+              </div>}
             </div>
           </CardContent>
         </Card>
       )}
 
       {/* Tabs */}
-      <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as 'sales' | 'returns')}>
+      <Tabs value={activeTab} onValueChange={(v) => {
+        const tab = v as 'sales' | 'returns';
+        setActiveTab(tab);
+        if (tab === 'returns') setSelectedStatus('all');
+      }}>
         <TabsList className="grid w-full max-w-md grid-cols-2">
           <TabsTrigger value="sales" className="gap-2">
             <Receipt size={16} />
@@ -808,7 +842,7 @@ const POSTransactionsList: React.FC<POSTransactionsListProps> = ({ onClose }) =>
           <Card>
             <CardContent className="p-0">
               <div className="overflow-x-auto scroll-smooth">
-                <div className="min-w-[1200px]">
+                <div className="min-w-[1450px]">
                   <Table>
                     <TableHeader className="sticky top-0 bg-background z-10">
                       <TableRow>
@@ -925,23 +959,24 @@ const POSTransactionsList: React.FC<POSTransactionsListProps> = ({ onClose }) =>
           <Card>
             <CardContent className="p-0">
               <div className="overflow-x-auto scroll-smooth">
-                <div className="min-w-[1200px]">
+                <div className="min-w-[1450px]">
                   <Table>
                     <TableHeader className="sticky top-0 bg-background z-10">
                       <TableRow>
                         <TableHead className="w-[180px] whitespace-nowrap">{t.returnNumber}</TableHead>
                         <TableHead className="w-[180px] whitespace-nowrap">{t.date}</TableHead>
+                        <TableHead className="w-[180px] whitespace-nowrap">{t.invoiceNumber}</TableHead>
                         <TableHead className="w-[250px] whitespace-nowrap">{t.customer}</TableHead>
                         <TableHead className="w-[150px] whitespace-nowrap">{t.refundMethod}</TableHead>
                         <TableHead className="w-[120px] whitespace-nowrap text-right">{t.total}</TableHead>
-                        <TableHead className="w-[120px] whitespace-nowrap">{t.status}</TableHead>
+                        <TableHead className="w-[140px] whitespace-nowrap text-right">{t.refundedTotal}</TableHead>
                         <TableHead className="w-[100px] whitespace-nowrap text-center">{t.actions}</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
                       {returnsLoading ? (
                         <TableRow>
-                          <TableCell colSpan={7} className="text-center py-8">
+                          <TableCell colSpan={8} className="text-center py-8">
                             <div className="flex items-center justify-center gap-2">
                               <Loader2 className="h-5 w-5 animate-spin text-primary" />
                               <span className="text-muted-foreground">{t.loading}</span>
@@ -950,7 +985,7 @@ const POSTransactionsList: React.FC<POSTransactionsListProps> = ({ onClose }) =>
                         </TableRow>
                       ) : filteredReturns.length === 0 ? (
                         <TableRow>
-                          <TableCell colSpan={7} className="text-center py-8 text-muted-foreground">
+                          <TableCell colSpan={8} className="text-center py-8 text-muted-foreground">
                             <RotateCcw className="mx-auto h-12 w-12 mb-4 opacity-20" />
                             <p>{t.noData}</p>
                           </TableCell>
@@ -969,9 +1004,12 @@ const POSTransactionsList: React.FC<POSTransactionsListProps> = ({ onClose }) =>
                                 {ret.return_number || '-'}
                               </TableCell>
                               <TableCell className="whitespace-nowrap">
-                                {ret.return_date || ret.created_at ? 
+                                {ret.return_date || ret.created_at ?
                                   format(new Date(ret.return_date || ret.created_at), 'yyyy-MM-dd HH:mm') : '-'
                                 }
+                              </TableCell>
+                              <TableCell className="font-mono text-sm whitespace-nowrap">
+                                {ret.invoice?.invoice_number || '-'}
                               </TableCell>
                               <TableCell>
                                 <div className="flex items-center gap-2 whitespace-nowrap">
@@ -983,9 +1021,11 @@ const POSTransactionsList: React.FC<POSTransactionsListProps> = ({ onClose }) =>
                                 {getPaymentMethodBadge(ret.refund_method || 'cash')}
                               </TableCell>
                               <TableCell className="font-semibold text-right text-red-600 whitespace-nowrap">
+                                -{formatNumber(ret.total_amount || 0)}
+                              </TableCell>
+                              <TableCell className="font-semibold text-right text-amber-600 whitespace-nowrap">
                                 -{formatNumber(ret.refunded_amount || 0)}
                               </TableCell>
-                              <TableCell>{getStatusBadge(ret.status || 'completed')}</TableCell>
                               <TableCell>
                                 <div className="flex items-center justify-center gap-1">
                                   <Button 
@@ -1202,7 +1242,15 @@ const POSTransactionsList: React.FC<POSTransactionsListProps> = ({ onClose }) =>
                   <div>
                     <p className="text-xs text-muted-foreground">{t.date}</p>
                     <p className="text-sm font-medium">
-                      {selectedReturn.return_date ? format(new Date(selectedReturn.return_date), 'yyyy-MM-dd HH:mm') : '-'}
+                      {selectedReturn.return_date || selectedReturn.created_at
+                        ? format(new Date(selectedReturn.return_date || selectedReturn.created_at), 'yyyy-MM-dd HH:mm')
+                        : '-'}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-muted-foreground">{t.invoiceNumber}</p>
+                    <p className="text-sm font-mono font-medium">
+                      {selectedReturn.invoice?.invoice_number || '-'}
                     </p>
                   </div>
                   <div>
@@ -1224,18 +1272,20 @@ const POSTransactionsList: React.FC<POSTransactionsListProps> = ({ onClose }) =>
                     <p className="text-xs text-muted-foreground">{t.refundMethod}</p>
                     <div className="mt-1">{getPaymentMethodBadge(selectedReturn.refund_method || 'cash')}</div>
                   </div>
-                  <div>
-                    <p className="text-xs text-muted-foreground">{t.status}</p>
-                    <div className="mt-1">{getStatusBadge(selectedReturn.status || 'completed')}</div>
-                  </div>
                 </div>
 
                 {/* Return Amount */}
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
                   <div className="p-4 bg-red-500/5 rounded-lg border border-red-500/20 text-center">
                     <p className="text-xs text-muted-foreground mb-1">{t.total}</p>
                     <p className="text-2xl font-bold text-red-600">
-                      -{formatNumber(selectedReturn.refunded_amount || selectedReturn.total_amount || 0)}
+                      -{formatNumber(selectedReturn.total_amount || 0)}
+                    </p>
+                  </div>
+                  <div className="p-4 bg-amber-500/5 rounded-lg border border-amber-500/20 text-center">
+                    <p className="text-xs text-muted-foreground mb-1">{t.refundedTotal}</p>
+                    <p className="text-2xl font-bold text-amber-600">
+                      -{formatNumber(selectedReturn.refunded_amount || 0)}
                     </p>
                   </div>
                   {selectedReturn.reason && (

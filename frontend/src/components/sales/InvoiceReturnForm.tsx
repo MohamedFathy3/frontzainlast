@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 // components/sales/InvoiceReturnForm.tsx
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { useRegionalSettings } from "@/contexts/RegionalSettingsContext";
@@ -11,16 +11,22 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { toast } from "sonner";
 import { Trash2, Save, Loader2, RotateCcw, ArrowLeftRight, X, Building2 } from "lucide-react";
 import api from "@/lib/api";
 
 interface ReturnItem {
   id: string;
+  sales_invoice_item_id: number;
   product_id: number;
   product_name: string;
   sku: string;
+  product_unit_id: number | null;
+  unit_name: string | null;
+  color_id: number | null;
+  color_name: string | null;
+  sold_quantity: number;
   quantity: number;
   price: number;
   reason: string;
@@ -92,6 +98,24 @@ const InvoiceReturnForm = ({ isOpen, onClose, invoiceData }: InvoiceReturnFormPr
     enabled: isOpen
   });
 
+  const returnAvailabilityQuery = useQuery({
+    queryKey: ['sales-return-availability', invoiceData?.id],
+    queryFn: async () => {
+      const response = await api.post('/sales-return/index', {
+        filters: { sales_invoice_id: invoiceData.id },
+        orderBy: 'id',
+        orderByDirection: 'asc',
+        perPage: 1000,
+        paginate: false
+      });
+      if (response.data.result !== 'Success') {
+        throw new Error(response.data.message || 'Failed to load existing returns');
+      }
+      return response.data.data || [];
+    },
+    enabled: isOpen && Boolean(invoiceData?.id)
+  });
+
   // ========== Load Invoice Data ==========
   useEffect(() => {
     if (isOpen && invoiceData) {
@@ -106,9 +130,15 @@ const InvoiceReturnForm = ({ isOpen, onClose, invoiceData }: InvoiceReturnFormPr
       if (invoiceData.items?.length > 0) {
         const returnItems = invoiceData.items.map((item: any) => ({
           id: crypto.randomUUID(),
+          sales_invoice_item_id: Number(item.id),
           product_id: item.product_id,
           product_name: item.product_name,
           sku: item.sku || '',
+          product_unit_id: item.product_unit_id ?? null,
+          unit_name: item.unit_name ?? null,
+          color_id: item.color_id ?? null,
+          color_name: item.color_name ?? null,
+          sold_quantity: Number(item.quantity) || 0,
           quantity: 1,
           price: Number(item.price) || 0,
           reason: ""
@@ -117,6 +147,60 @@ const InvoiceReturnForm = ({ isOpen, onClose, invoiceData }: InvoiceReturnFormPr
       }
     }
   }, [isOpen, invoiceData]);
+
+  const availableQuantities = useMemo(() => {
+    const remaining = new Map<number, number>(
+      (invoiceData?.items || []).map((item: any): [number, number] => [
+        Number(item.id),
+        Number(item.quantity) || 0
+      ])
+    );
+    const legacyReturns: any[] = [];
+
+    for (const returned of returnAvailabilityQuery.data || []) {
+      for (const returnedItem of returned.items || []) {
+        if (returnedItem.sales_invoice_item_id) {
+          const itemId = Number(returnedItem.sales_invoice_item_id);
+          remaining.set(itemId, Math.max(0, (remaining.get(itemId) || 0) - Number(returnedItem.quantity || 0)));
+        } else {
+          legacyReturns.push(returnedItem);
+        }
+      }
+    }
+
+    for (const returnedItem of legacyReturns) {
+      const matchingItems = (invoiceData?.items || []).filter((item: any) =>
+        Number(item.product_id) === Number(returnedItem.product_id)
+        && (returnedItem.product_unit_id == null || Number(item.product_unit_id) === Number(returnedItem.product_unit_id))
+        && (returnedItem.color_id == null || Number(item.color_id) === Number(returnedItem.color_id))
+      );
+      let quantityToAllocate = Number(returnedItem.quantity) || 0;
+      for (const invoiceItem of matchingItems) {
+        if (quantityToAllocate <= 0) break;
+        const itemId = Number(invoiceItem.id);
+        const available = remaining.get(itemId) || 0;
+        const allocated = Math.min(quantityToAllocate, available);
+        remaining.set(itemId, available - allocated);
+        quantityToAllocate -= allocated;
+      }
+    }
+
+    return remaining;
+  }, [invoiceData?.items, returnAvailabilityQuery.data]);
+
+  const getAvailableQuantity = useCallback(
+    (item: ReturnItem) => availableQuantities.get(item.sales_invoice_item_id) || 0,
+    [availableQuantities]
+  );
+
+  useEffect(() => {
+    if (returnAvailabilityQuery.data) {
+      setItems(currentItems => currentItems.map(item => ({
+        ...item,
+        quantity: Math.min(item.quantity, getAvailableQuantity(item))
+      })));
+    }
+  }, [getAvailableQuantity, returnAvailabilityQuery.data]);
 
   // ========== Calculations ==========
   const totals = {
@@ -163,12 +247,19 @@ const InvoiceReturnForm = ({ isOpen, onClose, invoiceData }: InvoiceReturnFormPr
       if (!formData.treasury_id) {
         throw new Error(language === 'ar' ? 'يجب اختيار الخزينة' : 'Treasury is required');
       }
-      if (items.length === 0) {
+      const selectedItems = items.filter(item => item.quantity > 0);
+      if (selectedItems.length === 0) {
         throw new Error(language === 'ar' ? 'يجب إضافة أصناف' : 'Items are required');
+      }
+      if (returnAvailabilityQuery.isLoading || returnAvailabilityQuery.isError) {
+        throw new Error(language === 'ar' ? 'تعذر التحقق من المرتجعات السابقة، أعد المحاولة' : 'Could not verify previous returns. Please retry.');
+      }
+      if (selectedItems.some(item => item.quantity > getAvailableQuantity(item))) {
+        throw new Error(language === 'ar' ? 'كمية المرتجع تتجاوز الكمية المتبقية من الفاتورة' : 'Return quantity exceeds the remaining invoice quantity');
       }
 
       // ✅ التأكد إن كل item عنده سبب
-      const invalidItems = items.filter(item => !item.reason || item.reason.trim() === '');
+      const invalidItems = selectedItems.filter(item => !item.reason || item.reason.trim() === '');
       if (invalidItems.length > 0) {
         throw new Error(language === 'ar' ? 'يجب كتابة سبب الإرجاع لجميع الأصناف' : 'Reason is required for all items');
       }
@@ -179,8 +270,11 @@ const InvoiceReturnForm = ({ isOpen, onClose, invoiceData }: InvoiceReturnFormPr
         return_method: formData.return_method,
         note: formData.note || null,
         treasury_id: Number(formData.treasury_id), // ✅ أضفنا treasury_id
-        items: items.map(item => ({
+        items: selectedItems.map(item => ({
+          sales_invoice_item_id: Number(item.sales_invoice_item_id),
           product_id: Number(item.product_id),
+          product_unit_id: item.product_unit_id,
+          color_id: item.color_id,
           quantity: Number(item.quantity),
           price: Number(item.price),
           reason: item.reason
@@ -197,6 +291,7 @@ const InvoiceReturnForm = ({ isOpen, onClose, invoiceData }: InvoiceReturnFormPr
       
       // تحديث البيانات
       queryClient.invalidateQueries({ queryKey: ['invoice-returns'] });
+      queryClient.invalidateQueries({ queryKey: ['sales-return-availability', invoiceData?.id] });
       queryClient.invalidateQueries({ queryKey: ['sales-invoices'] });
       queryClient.invalidateQueries({ queryKey: ['treasuries-form'] });
       
@@ -249,6 +344,11 @@ const InvoiceReturnForm = ({ isOpen, onClose, invoiceData }: InvoiceReturnFormPr
               <X className="h-4 w-4" />
             </Button>
           </DialogTitle>
+          <DialogDescription className="sr-only">
+            {language === 'ar'
+              ? 'نموذج إنشاء مرتجع لفاتورة مبيعات وتحديد المنتجات والكميات والخزينة.'
+              : 'Create a sales invoice return by selecting items, quantities, and treasury.'}
+          </DialogDescription>
         </DialogHeader>
 
         <div className="p-6">
@@ -345,11 +445,11 @@ const InvoiceReturnForm = ({ isOpen, onClose, invoiceData }: InvoiceReturnFormPr
                     </SelectTrigger>
                     <SelectContent>
                       {loadingTreasuries ? (
-                        <SelectItem value="" disabled>
+                        <SelectItem value="treasuries-loading" disabled>
                           {language === 'ar' ? 'جاري التحميل...' : 'Loading...'}
                         </SelectItem>
                       ) : treasuries.length === 0 ? (
-                        <SelectItem value="" disabled>
+                        <SelectItem value="no-treasuries" disabled>
                           {language === 'ar' ? 'لا توجد خزائن' : 'No treasuries found'}
                         </SelectItem>
                       ) : (
@@ -392,6 +492,9 @@ const InvoiceReturnForm = ({ isOpen, onClose, invoiceData }: InvoiceReturnFormPr
                         <TableHead className="min-w-[180px]">
                           {language === 'ar' ? 'المنتج' : 'Product'}
                         </TableHead>
+                        <TableHead className="min-w-[130px]">
+                          {language === 'ar' ? 'الوحدة / اللون' : 'Unit / Color'}
+                        </TableHead>
                         <TableHead className="w-20 text-center">
                           {language === 'ar' ? 'الكمية' : 'Qty'}
                         </TableHead>
@@ -411,7 +514,7 @@ const InvoiceReturnForm = ({ isOpen, onClose, invoiceData }: InvoiceReturnFormPr
                     <TableBody>
                       {items.length === 0 ? (
                         <TableRow>
-                          <TableCell colSpan={6} className="text-center py-12 text-muted-foreground">
+                          <TableCell colSpan={7} className="text-center py-12 text-muted-foreground">
                             <div className="flex flex-col items-center gap-3">
                               <ArrowLeftRight size={32} className="opacity-30" />
                               <span className="text-sm">
@@ -432,14 +535,24 @@ const InvoiceReturnForm = ({ isOpen, onClose, invoiceData }: InvoiceReturnFormPr
                               </div>
                             </TableCell>
                             <TableCell>
+                              <div>{item.unit_name || (language === 'ar' ? 'بدون وحدة' : 'No unit')}</div>
+                              <div className="text-xs text-muted-foreground">
+                                {item.color_name || (language === 'ar' ? 'بدون لون' : 'No color')}
+                              </div>
+                            </TableCell>
+                            <TableCell>
                               <Input
                                 type="number"
-                                min="1"
-                                max={invoiceData?.items?.find((i: any) => i.product_id === item.product_id)?.quantity || 99}
+                                min={getAvailableQuantity(item) > 0 ? 1 : 0}
+                                max={getAvailableQuantity(item)}
                                 value={item.quantity}
-                                onChange={(e) => updateItem(item.id, 'quantity', parseInt(e.target.value) || 1)}
+                                onChange={(e) => updateItem(item.id, 'quantity', parseInt(e.target.value) || 0)}
                                 className="w-16 text-center mx-auto"
+                                disabled={getAvailableQuantity(item) === 0 || returnAvailabilityQuery.isLoading}
                               />
+                              <div className="text-xs text-muted-foreground text-center mt-1">
+                                {language === 'ar' ? 'متاح' : 'Available'}: {getAvailableQuantity(item)}
+                              </div>
                             </TableCell>
                             <TableCell>
                               <Input

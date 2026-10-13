@@ -45,6 +45,7 @@ import { format } from 'date-fns';
 import POSDeliverySelector from '@/components/pos/POSDeliverySelector';
 import POSSalesRepSelector from '@/components/pos/POSSalesRepSelector';
 import api from '@/lib/api';
+import { useLoyaltySettings } from '@/hooks/useLoyaltySettings';
 
 // ==================== Interfaces ====================
 interface DeliveryMan {
@@ -125,6 +126,7 @@ const POS: React.FC = () => {
   const { userBranch, currentBranch,  } = useApp();
   const { formatCurrency } = useRegionalSettings();
   const { taxRates } = useCurrencyTax();
+  const { settings: loyaltySettings } = useLoyaltySettings(language);
   const navigate = useNavigate();
   
   // ==================== States ====================
@@ -156,6 +158,15 @@ const POS: React.FC = () => {
   // ✅ خصومات المنتجات والفاتورة
   const [invoiceDiscountPercentage, setInvoiceDiscountPercentage] = useState(0);
   const [invoiceDiscountAmount, setInvoiceDiscountAmount] = useState(0);
+  const [redeemedLoyaltyPoints, setRedeemedLoyaltyPoints] = useState(0);
+
+  useEffect(() => {
+    setRedeemedLoyaltyPoints(0);
+  }, [selectedCustomer?.id]);
+
+  useEffect(() => {
+    if (isOffline) setRedeemedLoyaltyPoints(0);
+  }, [isOffline]);
   
   // ✅ متغيرات للتمييز بين مسح الباركود والبحث اليدوي
   const [isBarcodeScanning, setIsBarcodeScanning] = useState(false);
@@ -301,34 +312,25 @@ const POS: React.FC = () => {
 
       for (const order of unsyncedOrders) {
         try {
-          const response = await fetch('/api/invoice/store', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Accept': 'application/json',
-            },
-            body: JSON.stringify({
+          await api.post('/invoice/store', {
               customer_id: parseInt(order.customer_id || '1'),
               items: order.items.map((item: any) => ({
                 product_id: parseInt(item.id),
                 quantity: item.quantity,
                 price: item.price,
                 color: item.colorName || null,
-                size: item.sizeName || null
+                size: item.sizeName || null,
+                unit_id: item.unitId || null,
+                color_id: item.colorId || null
               })),
               payments: order.payments || [],
               subtotal: order.subtotal,
               tax: order.tax,
               total: order.total,
-            })
           });
 
-          if (response.ok) {
-            await markOrderSynced(order.id);
-            successCount++;
-          } else {
-            failCount++;
-          }
+          await markOrderSynced(order.id);
+          successCount++;
         } catch (error) {
           failCount++;
         }
@@ -566,7 +568,10 @@ const POS: React.FC = () => {
     }));
   };
 
-  const clearCart = () => setCartItems([]);
+  const clearCart = () => {
+    setCartItems([]);
+    setRedeemedLoyaltyPoints(0);
+  };
 
   const holdOrder = () => {
     if (cartItems.length === 0) return;
@@ -584,6 +589,7 @@ const POS: React.FC = () => {
 
     setHeldOrders(prev => [...prev, newHeldOrder]);
     setCartItems([]);
+    setRedeemedLoyaltyPoints(0);
     
     toast({
       title: language === 'ar' ? 'تم تعليق الطلب' : 'Order held',
@@ -645,6 +651,11 @@ const POS: React.FC = () => {
   
   const calculateTax = () => (calculateSubtotalAfterAllDiscounts() * taxRate) / 100;
   const calculateTotal = () => calculateSubtotalAfterAllDiscounts() + calculateTax();
+  const calculateLoyaltyDiscount = () => Number(Math.min(
+    calculateTotal(),
+    calculateTotal() * redeemedLoyaltyPoints * Number(loyaltySettings?.point_value || 0) / 100
+  ).toFixed(2));
+  const calculatePayableTotal = () => Math.max(0, Number((calculateTotal() - calculateLoyaltyDiscount()).toFixed(2)));
 
   // ==================== Payment Handlers ====================
 const handlePaymentComplete = async (payments: { method: string; amount: number }[], invoiceNum?: string) => {
@@ -1211,6 +1222,11 @@ const handlePaymentComplete = async (payments: { method: string; amount: number 
               invoiceDiscountAmount={invoiceDiscountAmount}
               onInvoiceDiscountChange={handleInvoiceDiscountChange}
               onItemDiscountChange={handleItemDiscountChange}
+              customer={selectedCustomer}
+              loyaltyPointValue={Number(loyaltySettings?.point_value || 0)}
+              redeemedLoyaltyPoints={redeemedLoyaltyPoints}
+              onRedeemedLoyaltyPointsChange={setRedeemedLoyaltyPoints}
+              isOffline={isOffline}
             />
           </div>
         </div>
@@ -1236,7 +1252,11 @@ const handlePaymentComplete = async (payments: { method: string; amount: number 
         <POSPaymentModal
           isOpen={showPayment}
           onClose={() => setShowPayment(false)}
-          total={calculateTotal()}
+          total={calculatePayableTotal()}
+          invoiceTotal={calculateTotal()}
+          redeemedLoyaltyPoints={redeemedLoyaltyPoints}
+          loyaltyPointValue={Number(loyaltySettings?.point_value || 0)}
+          pointsPerReward={Number(loyaltySettings?.points || 0)}
           subtotal={calculateSubtotalAfterAllDiscounts()}
           tax={calculateTax()}
           cartItems={cartItems}

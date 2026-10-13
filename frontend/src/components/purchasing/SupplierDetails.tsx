@@ -64,6 +64,18 @@ interface SupplierResponse {
   status: number;
 }
 
+interface PaymentTreasury {
+  id: number;
+  name: string;
+  name_ar?: string;
+  currency?: string;
+  balance: number;
+  currencies?: Array<{
+    currency_id: number;
+    balance: number;
+  }>;
+}
+
 // export interface PurchaseInvoice {
 //   id: number;
 //   invoice_number: string;
@@ -168,10 +180,12 @@ const SupplierDetails: React.FC<SupplierDetailsProps> = ({
   const { formatCurrency } = useRegionalSettings();
   const queryClient = useQueryClient();
   const [selectedInvoiceForPayment, setSelectedInvoiceForPayment] = useState<PurchaseInvoice | null>(null);
+  const [selectedInvoiceDetails, setSelectedInvoiceDetails] = useState<PurchaseInvoice | null>(null);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [paymentData, setPaymentData] = useState<PaymentPayload>({
     amount: 0,
     payment_method: 'cash',
+    treasury_id: 0,
     reference_number: '',
     notes: '',
     payment_date: new Date().toISOString().split('T')[0]
@@ -224,6 +238,22 @@ const SupplierDetails: React.FC<SupplierDetailsProps> = ({
     queryKey: ['supplier-invoices', supplier?.id],
     queryFn: () => purchaseInvoiceService.getBySupplierId(supplier!.id),
     enabled: isOpen && !!supplier?.id,
+  });
+
+  const { data: treasuries = [], isLoading: treasuriesLoading } = useQuery<PaymentTreasury[]>({
+    queryKey: ['treasuries'],
+    queryFn: async () => {
+      const response = await api.post('/treasury/index', {
+        perPage: 1000,
+        paginate: false,
+      });
+
+      if (response.data.result !== 'Success') {
+        throw new Error(response.data.message || 'Failed to fetch treasuries');
+      }
+
+      return response.data.data || [];
+    },
   });
 
   // ==================== Fetch Purchase Orders ====================
@@ -314,12 +344,15 @@ const SupplierDetails: React.FC<SupplierDetailsProps> = ({
 
         refetchInvoices();
         queryClient.invalidateQueries({ queryKey: ['supplier-details', supplier?.id] });
+        queryClient.invalidateQueries({ queryKey: ['purchase-invoice-payables'] });
+        queryClient.invalidateQueries({ queryKey: ['treasuries'] });
 
         setShowPaymentModal(false);
         setSelectedInvoiceForPayment(null);
         setPaymentData({
           amount: 0,
           payment_method: 'cash',
+          treasury_id: 0,
           reference_number: '',
           notes: '',
           payment_date: new Date().toISOString().split('T')[0]
@@ -351,21 +384,24 @@ const SupplierDetails: React.FC<SupplierDetailsProps> = ({
     remaining: invoices.reduce((sum, inv) => {
       const total = Number(inv.total_amount);
       const paid = Number(inv.paid_amount || 0);
-      return sum + (total - paid);
+      const returned = Number(inv.returned_amount || 0);
+      return sum + Math.max(0, total - paid - returned);
     }, 0)
   };
 
   const currentSupplier = supplierDetails?.data || supplier;
 
   const handlePayClick = (invoice: PurchaseInvoice) => {
-    const total = Number(invoice.total_amount);
-    const paid = Number(invoice.paid_amount || 0);
-    const remaining = total - paid;
+    const returned = Number(invoice.returned_amount || 0);
+    const remaining = Number(invoice.remaining_amount ?? (
+      Number(invoice.total_amount) - Number(invoice.paid_amount || 0) - returned
+    ));
 
     setSelectedInvoiceForPayment(invoice);
     setPaymentData({
       amount: remaining,
       payment_method: 'cash',
+      treasury_id: 0,
       reference_number: '',
       notes: '',
       payment_date: new Date().toISOString().split('T')[0]
@@ -379,6 +415,14 @@ const SupplierDetails: React.FC<SupplierDetailsProps> = ({
     if (paymentData.amount <= 0) {
       toast({
         title: language === 'ar' ? 'المبلغ يجب أن يكون أكبر من صفر' : 'Amount must be greater than zero',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    if (!paymentData.treasury_id) {
+      toast({
+        title: language === 'ar' ? 'اختر الخزنة أولاً' : 'Select a treasury first',
         variant: 'destructive',
       });
       return;
@@ -543,16 +587,36 @@ const SupplierDetails: React.FC<SupplierDetailsProps> = ({
                               invoices.map((inv: PurchaseInvoice) => {
                                 const total = Number(inv.total_amount);
                                 const paid = Number(inv.paid_amount || 0);
-                                const remaining = total - paid;
+                                const returned = Number(inv.returned_amount || 0);
+                                const netTotal = Math.max(0, total - returned);
+                                const remaining = Math.max(0, Number(inv.remaining_amount ?? (netTotal - paid)));
                                 const paymentStatus = inv.payment_status ||
-                                  (remaining <= 0 ? 'paid' : remaining < total ? 'partial' : 'unpaid');
+                                  (remaining <= 0 ? 'paid' : remaining < netTotal ? 'partial' : 'unpaid');
 
                                 return (
-                                  <TableRow key={inv.id}>
-                                    <TableCell className="font-mono">{inv.invoice_number}</TableCell>
+                                  <TableRow
+                                    key={inv.id}
+                                    className="cursor-pointer hover:bg-muted/50"
+                                    onClick={() => setSelectedInvoiceDetails(inv)}
+                                  >
+                                    <TableCell className="font-mono text-primary underline-offset-4 hover:underline">
+                                      {inv.invoice_number}
+                                    </TableCell>
                                     <TableCell>{formatDate(inv.invoice_date)}</TableCell>
-                                    <TableCell className="text-end font-medium">{formatCurrency(total)}</TableCell>
-                                    <TableCell className="text-end">{formatCurrency(paid)}</TableCell>
+                                    <TableCell className="text-end font-medium">{formatCurrency(netTotal)}</TableCell>
+                                    <TableCell className="text-end">
+                                      <div>{formatCurrency(paid)}</div>
+                                      {inv.payment_history?.map((payment) => (
+                                        <div key={payment.id} className="mt-1 text-xs text-muted-foreground">
+                                          {formatDate(payment.payment_date)} · {payment.treasury_name || '-'} · {formatCurrency(payment.amount)}
+                                        </div>
+                                      ))}
+                                      {paid > 0 && !inv.payment_history?.length && (
+                                        <div className="mt-1 text-xs text-muted-foreground">
+                                          {language === 'ar' ? 'دفعات سابقة بدون سجل تفصيلي' : 'Prior payment has no detailed record'}
+                                        </div>
+                                      )}
+                                    </TableCell>
                                     <TableCell className="text-end font-medium text-destructive">{formatCurrency(remaining)}</TableCell>
                                     <TableCell>
                                       <Badge variant={
@@ -572,7 +636,10 @@ const SupplierDetails: React.FC<SupplierDetailsProps> = ({
                                         <Button
                                           size="sm"
                                           variant="ghost"
-                                          onClick={() => handlePayClick(inv)}
+                                          onClick={(event) => {
+                                            event.stopPropagation();
+                                            handlePayClick(inv);
+                                          }}
                                           className="h-8 w-8 p-0 text-success hover:text-success hover:bg-success/10"
                                           title={language === 'ar' ? 'تسديد دفعة' : 'Make payment'}
                                         >
@@ -595,6 +662,134 @@ const SupplierDetails: React.FC<SupplierDetailsProps> = ({
               </>
             )}
           </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={!!selectedInvoiceDetails}
+        onOpenChange={(open) => !open && setSelectedInvoiceDetails(null)}
+      >
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>
+              {language === 'ar' ? 'تفاصيل فاتورة الشراء' : 'Purchase Invoice Details'}
+              {selectedInvoiceDetails && (
+                <span className="ms-2 font-mono text-sm text-muted-foreground">
+                  {selectedInvoiceDetails.invoice_number}
+                </span>
+              )}
+            </DialogTitle>
+          </DialogHeader>
+
+          {selectedInvoiceDetails && (
+            <div className="space-y-5">
+              <div className="grid grid-cols-2 gap-3 rounded-lg border p-4 text-sm md:grid-cols-3">
+                <div>
+                  <div className="text-muted-foreground">{language === 'ar' ? 'التاريخ' : 'Date'}</div>
+                  <div className="font-medium">{formatDate(selectedInvoiceDetails.invoice_date)}</div>
+                </div>
+                <div>
+                  <div className="text-muted-foreground">{language === 'ar' ? 'المورد' : 'Supplier'}</div>
+                  <div className="font-medium">{selectedInvoiceDetails.supplier_name}</div>
+                </div>
+                <div>
+                  <div className="text-muted-foreground">{language === 'ar' ? 'الفرع' : 'Branch'}</div>
+                  <div className="font-medium">{selectedInvoiceDetails.branch_name || '-'}</div>
+                </div>
+                <div>
+                  <div className="text-muted-foreground">{language === 'ar' ? 'المخزن' : 'Warehouse'}</div>
+                  <div className="font-medium">{selectedInvoiceDetails.warehouse_name || '-'}</div>
+                </div>
+                <div>
+                  <div className="text-muted-foreground">{language === 'ar' ? 'طريقة الدفع' : 'Payment Method'}</div>
+                  <div className="font-medium">
+                    {selectedInvoiceDetails.payment_method === 'cash'
+                      ? (language === 'ar' ? 'نقداً' : 'Cash')
+                      : selectedInvoiceDetails.payment_method === 'credit'
+                        ? (language === 'ar' ? 'آجل' : 'Credit')
+                        : selectedInvoiceDetails.payment_method === 'check'
+                          ? (language === 'ar' ? 'شيك' : 'Check')
+                          : selectedInvoiceDetails.payment_method || '-'}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-muted-foreground">{language === 'ar' ? 'الخزنة' : 'Treasury'}</div>
+                  <div className="font-medium">{selectedInvoiceDetails.treasury_name || '-'}</div>
+                </div>
+              </div>
+
+              <div className="overflow-x-auto rounded-lg border">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>{language === 'ar' ? 'المنتج' : 'Product'}</TableHead>
+                      <TableHead>{language === 'ar' ? 'الوحدة' : 'Unit'}</TableHead>
+                      <TableHead>{language === 'ar' ? 'اللون' : 'Color'}</TableHead>
+                      <TableHead className="text-end">{language === 'ar' ? 'الكمية' : 'Quantity'}</TableHead>
+                      <TableHead className="text-end">{language === 'ar' ? 'السعر' : 'Price'}</TableHead>
+                      <TableHead className="text-end">{language === 'ar' ? 'الخصم' : 'Discount'}</TableHead>
+                      <TableHead className="text-end">{language === 'ar' ? 'الضريبة' : 'Tax'}</TableHead>
+                      <TableHead className="text-end">{language === 'ar' ? 'الإجمالي' : 'Total'}</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {selectedInvoiceDetails.items.map((item, index) => (
+                      <TableRow key={`${item.product_id}:${item.product_unit_id ?? 'none'}:${item.color_id ?? 'none'}:${index}`}>
+                        <TableCell>
+                          <div className="font-medium">
+                            {language === 'ar' ? (item.product_name_ar || item.product_name) : item.product_name}
+                          </div>
+                          {item.product_sku && (
+                            <div className="text-xs text-muted-foreground">{item.product_sku}</div>
+                          )}
+                        </TableCell>
+                        <TableCell>{item.unit_name || '-'}</TableCell>
+                        <TableCell>{item.color_name || '-'}</TableCell>
+                        <TableCell className="text-end">{Number(item.quantity).toLocaleString()}</TableCell>
+                        <TableCell className="text-end">{formatCurrency(Number(item.price))}</TableCell>
+                        <TableCell className="text-end">{Number(item.discount || 0)}%</TableCell>
+                        <TableCell className="text-end">{Number(item.tax || 0)}%</TableCell>
+                        <TableCell className="text-end font-medium">{formatCurrency(Number(item.total))}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+
+              <div className="ms-auto w-full max-w-sm space-y-2 rounded-lg border p-4 text-sm">
+                <div className="flex justify-between">
+                  <span>{language === 'ar' ? 'الإجمالي الفرعي' : 'Subtotal'}</span>
+                  <span>{formatCurrency(Number(selectedInvoiceDetails.subtotal))}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span>{language === 'ar' ? 'الخصم' : 'Discount'}</span>
+                  <span>{formatCurrency(Number(selectedInvoiceDetails.discount_total))}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span>{language === 'ar' ? 'الضريبة' : 'Tax'}</span>
+                  <span>{formatCurrency(Number(selectedInvoiceDetails.tax_total))}</span>
+                </div>
+                {Number(selectedInvoiceDetails.returned_amount || 0) > 0 && (
+                  <div className="flex justify-between text-orange-600">
+                    <span>{language === 'ar' ? 'المرتجعات' : 'Returns'}</span>
+                    <span>{formatCurrency(Number(selectedInvoiceDetails.returned_amount))}</span>
+                  </div>
+                )}
+                <div className="flex justify-between border-t pt-2 font-semibold">
+                  <span>{language === 'ar' ? 'الإجمالي' : 'Total'}</span>
+                  <span>{formatCurrency(Number(selectedInvoiceDetails.total_amount))}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span>{language === 'ar' ? 'المدفوع' : 'Paid'}</span>
+                  <span>{formatCurrency(Number(selectedInvoiceDetails.paid_amount))}</span>
+                </div>
+                <div className="flex justify-between font-semibold">
+                  <span>{language === 'ar' ? 'المتبقي' : 'Remaining'}</span>
+                  <span>{formatCurrency(Number(selectedInvoiceDetails.remaining_amount))}</span>
+                </div>
+              </div>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
 
@@ -624,13 +819,75 @@ const SupplierDetails: React.FC<SupplierDetailsProps> = ({
                 min="0.01"
                 step="0.01"
               />
-            </div>  </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label>{language === 'ar' ? 'تاريخ الدفع' : 'Payment date'}</Label>
+              <Input
+                type="date"
+                value={paymentData.payment_date || ''}
+                onChange={(e) => setPaymentData({ ...paymentData, payment_date: e.target.value })}
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label>{language === 'ar' ? 'الخزنة' : 'Treasury'}</Label>
+              <Select
+                value={paymentData.treasury_id ? String(paymentData.treasury_id) : ''}
+                onValueChange={(value) => setPaymentData({ ...paymentData, treasury_id: Number(value) })}
+                disabled={treasuriesLoading}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder={language === 'ar' ? 'اختر الخزنة' : 'Select treasury'} />
+                </SelectTrigger>
+                <SelectContent>
+                  {treasuries.map((treasury) => {
+                      const multiCurrencyBalance = treasury.currencies?.find(
+                        (currency) => Number(currency.currency_id) === Number(selectedInvoiceForPayment?.currency_id)
+                      )?.balance;
+                      const currencyMatches = treasury.currency?.toUpperCase()
+                        === selectedInvoiceForPayment?.currency_code?.toUpperCase();
+                      const currencyBalance = multiCurrencyBalance
+                        ?? (currencyMatches ? Number(treasury.balance || 0) : 0);
+
+                      return (
+                        <SelectItem key={treasury.id} value={String(treasury.id)}>
+                          {language === 'ar' ? (treasury.name_ar || treasury.name) : treasury.name}
+                          {' — '}
+                          {formatCurrency(currencyBalance)}
+                        </SelectItem>
+                      );
+                    })}
+                  {!treasuriesLoading && treasuries.length === 0 && (
+                    <SelectItem value="no-treasury" disabled>
+                      {language === 'ar' ? 'لا توجد خزائن' : 'No treasuries found'}
+                    </SelectItem>
+                  )}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+              <Label>{language === 'ar' ? 'رقم المرجع (اختياري)' : 'Reference (optional)'}</Label>
+              <Input
+                value={paymentData.reference_number || ''}
+                onChange={(e) => setPaymentData({ ...paymentData, reference_number: e.target.value })}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>{language === 'ar' ? 'ملاحظات (اختياري)' : 'Notes (optional)'}</Label>
+              <Input
+                value={paymentData.notes || ''}
+                onChange={(e) => setPaymentData({ ...paymentData, notes: e.target.value })}
+              />
+            </div>
+          </div>
 
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowPaymentModal(false)}>
               {language === 'ar' ? 'إلغاء' : 'Cancel'}
             </Button>
-            <Button onClick={handlePaySubmit} disabled={payInvoiceMutation.isPending}>
+            <Button onClick={handlePaySubmit} disabled={payInvoiceMutation.isPending || !paymentData.treasury_id}>
               {payInvoiceMutation.isPending ? (
                 <>
                   <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent me-2" />

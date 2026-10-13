@@ -30,7 +30,9 @@ import {
   CheckCircle,
   XCircle,
   Edit,
-  Trash2
+  Trash2,
+  FileSearch,
+  Loader2
 } from 'lucide-react';
 import api from '@/lib/api';
 import { Switch } from '@/components/ui/switch';
@@ -60,6 +62,33 @@ interface Customer {
     active?: boolean
 }
 
+interface CustomerStatementItem {
+  product_id?: number;
+  product_name?: string;
+  name?: string;
+  quantity: number;
+  price: number | string;
+  total?: number | string;
+  cost_price: number | string;
+  cost_is_estimated: boolean;
+  color?: string | null;
+  color_name?: string | null;
+  size?: string | null;
+  unit_name?: string | null;
+}
+
+interface CustomerStatementInvoice {
+  id: number;
+  invoice_number: string;
+  source: 'pos' | 'sales';
+  date: string | null;
+  currency: string;
+  total: number;
+  paid: number;
+  remaining: number;
+  items: CustomerStatementItem[];
+}
+
 const CRM = () => {
   const { language, direction } = useLanguage();
   const queryClient = useQueryClient();
@@ -74,6 +103,7 @@ const CRM = () => {
   const [searchQuery, setSearchQuery] = useState('');
 const [showEditCustomer, setShowEditCustomer] = useState<Customer | null>(null);
 const [showDeleteDialog, setShowDeleteDialog] = useState<Customer | null>(null);
+const [statementCustomer, setStatementCustomer] = useState<Customer | null>(null);
 const [isDeleting, setIsDeleting] = useState(false);
 const [editCustomer, setEditCustomer] = useState({
   name: '',
@@ -161,7 +191,25 @@ const [editCustomer, setEditCustomer] = useState({
       availablePoints: 'Available Points',
       earnedPoints: 'Earned Points',
       redeemedPoints: 'Redeemed Points',
-      currentTier: 'Current Tier'
+      currentTier: 'Current Tier',
+      customerStatement: 'Customer Statement',
+      invoice: 'Invoice',
+      invoiceCount: 'Invoices',
+      salesInvoice: 'Sales Invoice',
+      invoiceDate: 'Date',
+      product: 'Product',
+      quantity: 'Quantity',
+      unitPrice: 'Sale Price',
+      costPrice: 'Cost',
+      salesTotal: 'Sales Total',
+      costTotal: 'Total Cost',
+      grossProfit: 'Gross Profit',
+      paidAmount: 'Paid',
+      remainingAmount: 'Remaining',
+      invoiceItems: 'Products',
+      estimatedCost: 'Estimated',
+      estimatedCostNotice: 'Some older invoices do not have a saved cost. Their current product cost is shown as an estimate.',
+      noStatement: 'No invoices found for this customer.'
     },
     ar: {
       title: 'العملاء والولاء',
@@ -213,7 +261,25 @@ const [editCustomer, setEditCustomer] = useState({
       availablePoints: 'النقاط المتاحة',
       earnedPoints: 'النقاط المكتسبة',
       redeemedPoints: 'النقاط المستبدلة',
-      currentTier: 'المستوى الحالي'
+      currentTier: 'المستوى الحالي',
+      customerStatement: 'كشف العميل',
+      invoice: 'الفاتورة',
+      invoiceCount: 'عدد الفواتير',
+      salesInvoice: 'فاتورة مبيعات',
+      invoiceDate: 'التاريخ',
+      product: 'المنتج',
+      quantity: 'الكمية',
+      unitPrice: 'سعر البيع',
+      costPrice: 'التكلفة',
+      salesTotal: 'إجمالي المبيعات',
+      costTotal: 'إجمالي التكلفة',
+      grossProfit: 'مجمل الربح',
+      paidAmount: 'المدفوع',
+      remainingAmount: 'المتبقي',
+      invoiceItems: 'المنتجات',
+      estimatedCost: 'تقديرية',
+      estimatedCostNotice: 'بعض الفواتير القديمة لا تحتوي على تكلفة محفوظة، لذلك تظهر تكلفة المنتج الحالية كتقدير.',
+      noStatement: 'لا توجد فواتير لهذا العميل.'
     }
   };
 
@@ -323,6 +389,70 @@ const [editCustomer, setEditCustomer] = useState({
         return [];
       }
     }
+  });
+
+  const { data: statementInvoices = [], isLoading: statementLoading } = useQuery<CustomerStatementInvoice[]>({
+    queryKey: ['customer-statement', statementCustomer?.id],
+    enabled: Boolean(statementCustomer),
+    queryFn: async () => {
+      if (!statementCustomer) return [];
+
+      try {
+        const payload = {
+          filters: { customer_id: Number(statementCustomer.id) },
+          orderBy: 'id',
+          orderByDirection: 'desc',
+          paginate: false,
+        };
+        const [posResponse, salesResponse] = await Promise.all([
+          api.post('/invoices/index', payload),
+          api.post('/sales-invoices/index', payload),
+        ]);
+
+        if (posResponse.data.result !== 'Success' || salesResponse.data.result !== 'Success') {
+          throw new Error(posResponse.data.message || salesResponse.data.message || 'Failed to load customer statement');
+        }
+
+        const posInvoices: CustomerStatementInvoice[] = (posResponse.data.data || []).map((invoice: any) => ({
+          id: invoice.id,
+          invoice_number: invoice.invoice_number,
+          source: 'pos',
+          date: invoice.created_at || null,
+          currency: 'YER',
+          total: Number(invoice.amounts?.total ?? invoice.total_amount ?? 0),
+          paid: Number(invoice.amounts?.paid ?? invoice.paid_amount ?? 0),
+          remaining: Number(invoice.amounts?.remaining ?? invoice.remaining_amount ?? 0),
+          items: (invoice.items || []).map((item: any) => ({
+            ...item,
+            cost_price: Number(item.cost_price ?? 0),
+            cost_is_estimated: Boolean(item.cost_is_estimated),
+          })),
+        }));
+        const salesInvoices: CustomerStatementInvoice[] = (salesResponse.data.data || []).map((invoice: any) => ({
+          id: invoice.id,
+          invoice_number: invoice.invoice_number,
+          source: 'sales',
+          date: invoice.invoice_date || invoice.created_at || null,
+          currency: invoice.currency || 'YER',
+          total: Number(invoice.net_total ?? invoice.total_amount ?? 0),
+          paid: Number(invoice.paid_amount ?? 0),
+          remaining: Number(invoice.remaining_amount ?? (Number(invoice.net_total ?? invoice.total_amount ?? 0) - Number(invoice.paid_amount ?? 0))),
+          items: (invoice.items || []).map((item: any) => ({
+            ...item,
+            cost_price: Number(item.cost_price ?? 0),
+            cost_is_estimated: Boolean(item.cost_is_estimated),
+          })),
+        }));
+
+        return [...posInvoices, ...salesInvoices].sort(
+          (a, b) => new Date(b.date || 0).getTime() - new Date(a.date || 0).getTime()
+        );
+      } catch (error) {
+        console.error('Error fetching customer statement:', error);
+        toast.error(language === 'ar' ? 'تعذر تحميل كشف العميل' : 'Failed to load customer statement');
+        throw error;
+      }
+    },
   });
 
   // ========== Mutations ==========
@@ -713,6 +843,33 @@ const handleToggleStatus = (customer: Customer) => {
   ];
 
   const isLoading = customersLoading || loyaltyLoading;
+  const statementTotalsByCurrency = statementInvoices.reduce<Record<string, {
+    sales: number;
+    cost: number;
+    paid: number;
+    remaining: number;
+  }>>((totals, invoice) => {
+    const currency = invoice.currency || 'YER';
+    const currencyTotals = totals[currency] || { sales: 0, cost: 0, paid: 0, remaining: 0 };
+    currencyTotals.sales += invoice.total;
+    currencyTotals.cost += invoice.items.reduce(
+      (sum, item) => sum + Number(item.cost_price || 0) * Number(item.quantity || 0),
+      0
+    );
+    currencyTotals.paid += invoice.paid;
+    currencyTotals.remaining += invoice.remaining;
+    totals[currency] = currencyTotals;
+    return totals;
+  }, {});
+  const formatStatementTotals = (key: 'sales' | 'cost' | 'paid' | 'remaining') =>
+    Object.entries(statementTotalsByCurrency)
+      .map(([currency, totals]) => `${formatStatementAmount(totals[key])} ${currency}`)
+      .join(' · ') || `0.00 YER`;
+  const statementHasEstimatedCosts = statementInvoices.some(invoice => invoice.items.some(item => item.cost_is_estimated));
+  const formatStatementAmount = (amount: number) => amount.toLocaleString(undefined, {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
 
   // ========== Render ==========
   return (
@@ -902,6 +1059,16 @@ const handleToggleStatus = (customer: Customer) => {
                 {language === 'ar' ? 'تعديل' : 'Edit'}
               </Button>
 
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setStatementCustomer(customer)}
+                className="gap-1"
+              >
+                <FileSearch size={14} />
+                {t.customerStatement}
+              </Button>
+
               {/* Redeem Points Button */}
               <Button
                 variant="outline"
@@ -1037,6 +1204,122 @@ const handleToggleStatus = (customer: Customer) => {
             </div>
           </TabsContent>
         </Tabs>
+
+        <Dialog open={Boolean(statementCustomer)} onOpenChange={(open) => {
+          if (!open) setStatementCustomer(null);
+        }}>
+          <DialogContent className="max-w-6xl max-h-[90vh] overflow-hidden flex flex-col">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <FileSearch className="h-5 w-5 text-primary" />
+                {t.customerStatement}
+                {statementCustomer && ` - ${language === 'ar' ? statementCustomer.name_ar || statementCustomer.name : statementCustomer.name}`}
+              </DialogTitle>
+            </DialogHeader>
+            {statementLoading ? (
+              <div className="flex items-center justify-center gap-2 py-12 text-muted-foreground">
+                <Loader2 className="h-5 w-5 animate-spin" />
+                {language === 'ar' ? 'جاري تحميل كشف العميل...' : 'Loading customer statement...'}
+              </div>
+            ) : (
+              <div className="space-y-4 overflow-y-auto pe-1">
+                <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
+                  {[
+                    { label: t.invoiceCount, value: statementInvoices.length },
+                    { label: t.salesTotal, value: formatStatementTotals('sales') },
+                    { label: t.costTotal, value: formatStatementTotals('cost') },
+                    { label: t.grossProfit, value: Object.entries(statementTotalsByCurrency)
+                      .map(([currency, totals]) => `${formatStatementAmount(totals.sales - totals.cost)} ${currency}`)
+                      .join(' · ') || `0.00 YER` },
+                    { label: t.paidAmount, value: formatStatementTotals('paid') },
+                    { label: t.remainingAmount, value: formatStatementTotals('remaining') },
+                  ].map((metric) => (
+                    <Card key={metric.label}>
+                      <CardContent className="p-3">
+                        <p className="text-xs text-muted-foreground">{metric.label}</p>
+                        <p className="font-semibold text-sm">{metric.value}</p>
+                      </CardContent>
+                    </Card>
+                  ))}
+                </div>
+
+                {statementHasEstimatedCosts && (
+                  <p className="rounded-md bg-amber-500/10 p-3 text-sm text-amber-700">
+                    {t.estimatedCostNotice}
+                  </p>
+                )}
+
+                {statementInvoices.length === 0 ? (
+                  <div className="py-12 text-center text-muted-foreground">{t.noStatement}</div>
+                ) : statementInvoices.map((invoice) => (
+                  <Card key={`${invoice.source}-${invoice.id}`}>
+                    <CardContent className="space-y-3 p-4">
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <div>
+                          <p className="font-semibold">
+                            {t.invoice}: <span className="font-mono">{invoice.invoice_number}</span>
+                          </p>
+                          <p className="text-xs text-muted-foreground">
+                            {invoice.date || '-'} · {invoice.source === 'pos' ? 'POS' : t.salesInvoice}
+                          </p>
+                        </div>
+                        <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm">
+                          <span>{t.salesTotal}: <strong>{formatStatementAmount(invoice.total)} {invoice.currency}</strong></span>
+                          <span>{t.paidAmount}: <strong>{formatStatementAmount(invoice.paid)} {invoice.currency}</strong></span>
+                          <span>{t.remainingAmount}: <strong>{formatStatementAmount(invoice.remaining)} {invoice.currency}</strong></span>
+                        </div>
+                      </div>
+
+                      <div className="overflow-x-auto rounded-md border">
+                        <Table>
+                          <TableHeader>
+                            <TableRow>
+                              <TableHead>{t.product}</TableHead>
+                              <TableHead>{language === 'ar' ? 'المقاس / اللون' : 'Variant'}</TableHead>
+                              <TableHead className="text-end">{t.quantity}</TableHead>
+                              <TableHead className="text-end">{t.unitPrice}</TableHead>
+                              <TableHead className="text-end">{t.costPrice}</TableHead>
+                              <TableHead className="text-end">{t.salesTotal}</TableHead>
+                              <TableHead className="text-end">{t.costTotal}</TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {invoice.items.map((item, index) => {
+                              const quantity = Number(item.quantity || 0);
+                              const saleTotal = Number(item.total ?? Number(item.price || 0) * quantity);
+                              const costTotal = Number(item.cost_price || 0) * quantity;
+                              const variant = [item.unit_name || item.size, item.color_name || item.color]
+                                .filter(Boolean)
+                                .join(' / ');
+                              return (
+                                <TableRow key={`${item.product_id || 'product'}-${index}`}>
+                                  <TableCell>{item.product_name || item.name || '-'}</TableCell>
+                                  <TableCell>{variant || '-'}</TableCell>
+                                  <TableCell className="text-end">{quantity}</TableCell>
+                                  <TableCell className="text-end">{formatStatementAmount(Number(item.price || 0))} {invoice.currency}</TableCell>
+                                  <TableCell className="text-end">
+                                    {formatStatementAmount(Number(item.cost_price || 0))}
+                                    {' '}{invoice.currency}
+                                    {item.cost_is_estimated && (
+                                      <Badge variant="outline" className="ms-1 text-[10px]">{t.estimatedCost}</Badge>
+                                    )}
+                                  </TableCell>
+                                  <TableCell className="text-end">{formatStatementAmount(saleTotal)} {invoice.currency}</TableCell>
+                                  <TableCell className="text-end">{formatStatementAmount(costTotal)} {invoice.currency}</TableCell>
+                                </TableRow>
+                              );
+                            })}
+                          </TableBody>
+                        </Table>
+                      </div>
+                    </CardContent>
+                  </Card>
+                ))}
+
+              </div>
+            )}
+          </DialogContent>
+        </Dialog>
 
         {/* ========== Add Customer Dialog ========== */}
         <Dialog open={showAddCustomer} onOpenChange={setShowAddCustomer}>

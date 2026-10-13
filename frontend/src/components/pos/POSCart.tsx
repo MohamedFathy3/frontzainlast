@@ -5,7 +5,7 @@ import { useLanguage } from '@/contexts/LanguageContext';
 import { useCurrencyTax } from '@/hooks/useCurrencyTax';
 import { useRegionalSettings } from '@/contexts/RegionalSettingsContext';
 import { cn } from '@/lib/utils';
-import { Minus, Plus, Trash2, CreditCard, Pause, AlertCircle, Info, Percent } from 'lucide-react';
+import { Minus, Plus, Trash2, CreditCard, Pause, AlertCircle, Info, Percent, Star } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { Input } from '@/components/ui/input';
@@ -38,6 +38,11 @@ interface POSCartProps {
   invoiceDiscountAmount?: number;
   onInvoiceDiscountChange?: (percentage: number, amount: number) => void;
   onItemDiscountChange?: (itemId: string, percentage: number, variantId?: string) => void;
+  customer?: { loyalty_points?: number | null } | null;
+  loyaltyPointValue?: number;
+  redeemedLoyaltyPoints?: number;
+  onRedeemedLoyaltyPointsChange?: (points: number) => void;
+  isOffline?: boolean;
 }
 
 const POSCart: React.FC<POSCartProps> = ({
@@ -51,7 +56,12 @@ const POSCart: React.FC<POSCartProps> = ({
   invoiceDiscountPercentage = 0,
   invoiceDiscountAmount = 0,
   onInvoiceDiscountChange,
-  onItemDiscountChange
+  onItemDiscountChange,
+  customer,
+  loyaltyPointValue = 0,
+  redeemedLoyaltyPoints = 0,
+  onRedeemedLoyaltyPointsChange,
+  isOffline = false
 }) => {
   const { language } = useLanguage();
   const { taxRates } = useCurrencyTax();
@@ -84,7 +94,14 @@ const POSCart: React.FC<POSCartProps> = ({
   
   // ✅ الضريبة (تحسب بعد كل الخصومات)
   const tax = (subtotalAfterAllDiscounts * taxRate) / 100;
-  const total = subtotalAfterAllDiscounts + tax;
+  const invoiceTotal = subtotalAfterAllDiscounts + tax;
+  const loyaltyDiscountPercentage = redeemedLoyaltyPoints * loyaltyPointValue;
+  const loyaltyDiscountAmount = Number(Math.min(invoiceTotal, invoiceTotal * loyaltyDiscountPercentage / 100).toFixed(2));
+  const total = Math.max(0, Number((invoiceTotal - loyaltyDiscountAmount).toFixed(2)));
+  const maxRedeemablePoints = Math.min(
+    Number(customer?.loyalty_points || 0),
+    loyaltyPointValue > 0 ? Math.floor(100 / loyaltyPointValue) : 0
+  );
 
   // ✅ معالج تغيير خصم المنتج
   const handleItemDiscountChange = (item: CartItem, percentage: number) => {
@@ -309,6 +326,46 @@ const POSCart: React.FC<POSCartProps> = ({
                 </span>
               )}
             </div>
+
+            {customer && (
+              <div className="rounded-lg border border-warning/30 bg-warning/5 p-2 space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <label htmlFor="pos-loyalty-points" className="flex items-center gap-1 text-xs text-muted-foreground">
+                    <Star size={13} className="text-warning" />
+                    {language === 'ar' ? 'استخدام نقاط الولاء' : 'Redeem loyalty points'}
+                    <span className="text-warning">({customer.loyalty_points || 0})</span>
+                  </label>
+                  <Input
+                    id="pos-loyalty-points"
+                    type="number"
+                    min={0}
+                    max={maxRedeemablePoints}
+                    step={1}
+                    value={redeemedLoyaltyPoints || ''}
+                    disabled={isOffline || loyaltyPointValue <= 0 || maxRedeemablePoints <= 0}
+                    onChange={(event) => {
+                      const requestedPoints = Math.floor(Number(event.target.value) || 0);
+                      onRedeemedLoyaltyPointsChange?.(
+                        Math.max(0, Math.min(requestedPoints, maxRedeemablePoints))
+                      );
+                    }}
+                    placeholder="0"
+                    className="w-20 h-7 text-sm text-center"
+                  />
+                </div>
+                {loyaltyDiscountAmount > 0 && (
+                  <div className="flex justify-between text-xs text-success">
+                    <span>{language === 'ar' ? `خصم ${loyaltyDiscountPercentage}% بالنقاط` : `${loyaltyDiscountPercentage}% points discount`}</span>
+                    <span>-{formatCurrency(loyaltyDiscountAmount)}</span>
+                  </div>
+                )}
+                {isOffline && (
+                  <p className="text-[11px] text-muted-foreground">
+                    {language === 'ar' ? 'استبدال النقاط متاح عند الاتصال بالإنترنت فقط' : 'Redeeming points requires an internet connection'}
+                  </p>
+                )}
+              </div>
+            )}
 
             <div className="flex justify-between">
               <span>{language === 'ar' ? `الضريبة (${taxRate}%)` : `VAT (${taxRate}%)`}</span>

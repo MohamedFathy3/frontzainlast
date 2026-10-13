@@ -10,6 +10,7 @@ import BarcodePrintingCenter from '@/components/inventory/BarcodePrintingCenter'
 import StockTransfer from '@/components/inventory/StockTransfer';
 import LowStockAlerts from '@/components/inventory/LowStockAlerts';
 import InventoryCount from '@/components/inventory/InventoryCount';
+import WarehouseStockReport from '@/components/inventory/WarehouseStockReport';
 import UnitsVariantsManager from '@/components/inventory/UnitsVariantsManager';
 import PromotionsManager from '@/components/inventory/PromotionsManager';
 import { Button } from '@/components/ui/button';
@@ -17,7 +18,7 @@ import { Input } from '@/components/ui/input';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Card, CardContent } from '@/components/ui/card';
-import { Plus, Search, Package, ArrowRightLeft, Bell, ClipboardList, Palette, Filter, X, Tag, Gift, SortAsc } from 'lucide-react';
+import { Plus, Search, Package, ArrowRightLeft, Bell, ClipboardList, Palette, Filter, X, Tag, Gift, SortAsc, Warehouse } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { toast } from '@/hooks/use-toast';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -758,6 +759,10 @@ const Inventory: React.FC = () => {
                   <ClipboardList size={14} />
                   {language === 'ar' ? 'الجرد' : 'Count'}
                 </TabsTrigger>
+                <TabsTrigger value="warehouse-report" className="flex items-center gap-1.5 text-xs px-3.5 rounded-md data-[state=active]:bg-emerald-500 data-[state=active]:text-white data-[state=active]:shadow-sm transition-all">
+                  <Warehouse size={14} />
+                  {language === 'ar' ? 'أرصدة المخازن' : 'Warehouse balances'}
+                </TabsTrigger>
               </TabsList>
             </div>
 
@@ -941,6 +946,10 @@ const Inventory: React.FC = () => {
                 <InventoryCount />
               </CardContent>
             </Card>
+          </TabsContent>
+
+          <TabsContent value="warehouse-report" className="flex-1 mt-2">
+            <WarehouseStockReport />
           </TabsContent>
 
           <TabsContent value="variants" className="flex-1 mt-2">

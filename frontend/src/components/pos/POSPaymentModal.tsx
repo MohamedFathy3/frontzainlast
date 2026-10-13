@@ -13,6 +13,7 @@ import { Button } from '../ui/button';
 import { useAuth } from '@/contexts/AuthContext';
 import { useRegionalSettings } from '@/contexts/RegionalSettingsContext';
 import { useCurrencyTax } from '@/hooks/useCurrencyTax';
+import api from '@/lib/api';
 
 type PaymentMethodType = 'cash' | 'card' | 'wallet' | 'split';
 
@@ -43,6 +44,8 @@ interface CartItem {
   sku: string;
   sizeName?: string;
   colorName?: string;
+  unitId?: number;
+  colorId?: number;
   discount_percentage?: number;
 }
 
@@ -50,6 +53,10 @@ interface PaymentModalProps {
   isOpen: boolean;
   onClose: () => void;
   total: number;
+  invoiceTotal?: number;
+  redeemedLoyaltyPoints?: number;
+  loyaltyPointValue?: number;
+  pointsPerReward?: number;
   subtotal: number;
   tax: number;
   cartItems: CartItem[];
@@ -85,6 +92,10 @@ const POSPaymentModal: React.FC<PaymentModalProps> = ({
   isOpen,
   onClose,
   total,
+  invoiceTotal = total,
+  redeemedLoyaltyPoints = 0,
+  loyaltyPointValue = 0,
+  pointsPerReward = 0,
   subtotal,
   tax,
   cartItems,
@@ -118,6 +129,10 @@ const POSPaymentModal: React.FC<PaymentModalProps> = ({
   const [showPrintOptions, setShowPrintOptions] = useState(false);
   const [completedInvoice, setCompletedInvoice] = useState<any>(null);
   const { formatCurrency } = useRegionalSettings();
+  const loyaltyDiscountAmount = Number(Math.min(
+    invoiceTotal,
+    invoiceTotal * redeemedLoyaltyPoints * loyaltyPointValue / 100
+  ).toFixed(2));
 
   const invoiceRef = useRef<HTMLDivElement>(null);
 
@@ -191,13 +206,7 @@ const POSPaymentModal: React.FC<PaymentModalProps> = ({
     
     const originalTotal = cartItems.reduce((sum, item) => sum + (item.price * item.quantity), 0);
     
-    const afterItemDiscount = cartItems.reduce((sum, item) => {
-      const itemOriginal = item.price * item.quantity;
-      const itemDiscountPercent = (item.discount_percentage || 0) / 100;
-      return sum + (itemOriginal * (1 - itemDiscountPercent));
-    }, 0);
-    
-    const finalTotal = afterItemDiscount * (1 - (invoiceDiscountPercentage / 100));
+    const finalTotal = subtotal;
     
     const totalDiscountAmount = originalTotal - finalTotal;
     const totalDiscountPercentage = originalTotal > 0 ? (totalDiscountAmount / originalTotal) * 100 : 0;
@@ -210,7 +219,18 @@ const POSPaymentModal: React.FC<PaymentModalProps> = ({
   };
 
  const handleSaveAndPrint = async (type: 'save' | 'print' | 'both') => {
+  if (isOffline && redeemedLoyaltyPoints > 0) {
+    toast({
+      title: language === 'ar' ? 'تعذر استبدال النقاط' : 'Cannot redeem points',
+      description: language === 'ar' ? 'استبدال النقاط يتطلب الاتصال بالإنترنت' : 'Redeeming loyalty points requires an internet connection',
+      variant: 'destructive',
+    });
+    return;
+  }
+
   let payments: { method: string; amount: number }[] = [];
+  let settledPayments: { method: string; amount: number }[] = [];
+  let savedLoyaltyDiscount = 0;
 
   if (paymentMethod === 'split') {
     Object.entries(splitAmounts).forEach(([method, amount]) => {
@@ -229,7 +249,7 @@ const POSPaymentModal: React.FC<PaymentModalProps> = ({
 
   const totalDiscountPercentage = calculateTotalDiscountPercentage();
   const originalTotal = getOriginalTotal();
-  const totalDiscountAmount = originalTotal - total;
+  const totalDiscountAmount = originalTotal - subtotal;
 
   setIsProcessing(true);
   try {
@@ -242,13 +262,16 @@ const POSPaymentModal: React.FC<PaymentModalProps> = ({
         price: item.price,
         color: item.colorName || null,
         size: item.sizeName || null,
+        unit_id: item.unitId || null,
+        color_id: item.colorId || null,
         discount_amount: totalDiscountAmount
       })),
       discount_percentage: totalDiscountPercentage,
       payments: payments,
       subtotal: subtotal,
       tax: tax,
-      total: total,
+      total: invoiceTotal,
+      redeem_points: redeemedLoyaltyPoints,
       shift_id: shiftId,
       branch_id: branchId,
       delivery_id: parseInt(String(deliveryPerson?.id)) || null,
@@ -257,6 +280,7 @@ const POSPaymentModal: React.FC<PaymentModalProps> = ({
     let invoiceId = '';
     let invoiceNumberFromServer = '';  // ✅ متغير لتخزين رقم الفاتورة من السيرفر
     let success = false;
+    settledPayments = [...payments];
 
     if (isOffline) {
       // ✅ في حالة عدم الاتصال، نولد رقم مؤقت
@@ -277,6 +301,7 @@ const POSPaymentModal: React.FC<PaymentModalProps> = ({
         invoiceId = offlineId;
         invoiceNumberFromServer = offlineInvoiceNumber;
         success = true;
+        savedLoyaltyDiscount = 0;
         toast({
           title: language === 'ar' ? 'نجاح' : 'Success',
           description: language === 'ar'
@@ -287,22 +312,21 @@ const POSPaymentModal: React.FC<PaymentModalProps> = ({
         throw new Error('Failed to save offline');
       }
     } else {
-      const response = await fetch('/api/invoice/store', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json',
-        },
-        body: JSON.stringify(invoiceData)
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.message || 'Failed to create invoice');
+      const response = await api.post('/invoice/store', invoiceData);
+      const result = response.data;
+      if (result?.status === false || result?.result === 'Error') {
+        throw new Error(result.message || (language === 'ar' ? 'فشل في إنشاء الفاتورة' : 'Failed to create invoice'));
       }
-
-      const result = await response.json();
       console.log('📦 Server response:', result);
+
+      const savedPayments = Array.isArray(result.data?.payments)
+        ? result.data.payments
+        : payments;
+      savedLoyaltyDiscount = Number(result.data?.loyalty_discount_amount ?? loyaltyDiscountAmount);
+      settledPayments = savedLoyaltyDiscount > 0
+        && !savedPayments.some((payment: { method: string }) => payment.method === 'loyalty_points')
+        ? [...savedPayments, { method: 'loyalty_points', amount: savedLoyaltyDiscount }]
+        : savedPayments;
       
       // ✅ استخراج رقم الفاتورة من الـ response
       invoiceId = result.data?.id || `INV-${Date.now()}`;
@@ -353,23 +377,24 @@ const POSPaymentModal: React.FC<PaymentModalProps> = ({
           colorName: item.colorName,
           colorNameAr: item.colorName,
         })),
-        subtotal: subtotal,
+        subtotal: originalTotal,
         tax: tax,
         taxRate: defaultTax?.rate || 0,
-        total: total,
-        payments: payments,
+        total: invoiceTotal,
+        payments: settledPayments,
         change: calculateChange(),
         totalDiscountPercentage: totalDiscountPercentage,
         totalDiscountAmount: totalDiscountAmount,
         invoiceDiscountPercentage: invoiceDiscountPercentage,
+        loyaltyDiscountAmount: savedLoyaltyDiscount,
       };
 
       console.log('📄 Print data with invoice number:', printData.invoice_number);
 
-      setCompletedInvoice({ payments, printData });
+      setCompletedInvoice({ payments: settledPayments, printData });
 
       if (type === 'save') {
-        onComplete(payments, invoiceNumberFromServer);  // ✅ إرسال رقم الفاتورة من السيرفر
+        onComplete(settledPayments, invoiceNumberFromServer);
       } else if (type === 'print') {
         handlePrint();
       } else if (type === 'both') {
@@ -379,11 +404,23 @@ const POSPaymentModal: React.FC<PaymentModalProps> = ({
         }, 100);
       }
     }
-  } catch (error) {
+  } catch (error: any) {
     console.error('Error saving invoice:', error);
+    const errorData = error.response?.data;
+    const validationErrors = errorData?.errors && typeof errorData.errors === 'object'
+      ? Object.values(errorData.errors).flat().filter((message): message is string => typeof message === 'string')
+      : [];
+    const errorMessage = [
+      errorData?.message,
+      errorData?.error,
+      ...validationErrors,
+    ].filter((message): message is string => typeof message === 'string' && message.trim().length > 0);
+    const message = [...new Set(errorMessage)].join('\n')
+      || error.message
+      || (language === 'ar' ? 'فشل في حفظ الفاتورة' : 'Failed to save invoice');
     toast({
       title: language === 'ar' ? 'خطأ' : 'Error',
-      description: language === 'ar' ? 'فشل في حفظ الفاتورة' : 'Failed to save invoice',
+      description: <div dir={isRTL ? 'rtl' : 'ltr'} className="max-h-32 overflow-y-auto whitespace-pre-wrap break-words">{message}</div>,
       variant: 'destructive',
     });
   } finally {
@@ -588,7 +625,9 @@ const POSPaymentModal: React.FC<PaymentModalProps> = ({
                     </div>
                   )}
                   <div className="text-xs text-success mt-1">
-                    +{Math.floor(total / 1000)} {language === 'ar' ? 'نقطة جديدة' : 'new pts'}
+                    {pointsPerReward > 0
+                      ? `+${Math.floor(total / pointsPerReward)} ${language === 'ar' ? 'نقطة جديدة' : 'new pts'}`
+                      : null}
                   </div>
                 </div>
               )}
@@ -619,6 +658,13 @@ const POSPaymentModal: React.FC<PaymentModalProps> = ({
             <p className="text-4xl font-bold text-primary">
               {total.toLocaleString()} <span className="text-lg"></span>
             </p>
+            {loyaltyDiscountAmount > 0 && (
+              <p className="text-xs text-success mt-2">
+                {language === 'ar'
+                  ? `${redeemedLoyaltyPoints} نقطة خصمت ${formatCurrency(loyaltyDiscountAmount)} من إجمالي ${formatCurrency(invoiceTotal)}`
+                  : `${redeemedLoyaltyPoints} points deducted ${formatCurrency(loyaltyDiscountAmount)} from ${formatCurrency(invoiceTotal)}`}
+              </p>
+            )}
           </div>
 
           <div className="flex gap-2 mb-6 justify-center">

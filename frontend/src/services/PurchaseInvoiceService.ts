@@ -51,6 +51,16 @@ class PurchaseInvoiceService extends BaseService<PurchaseInvoice> {
         }
     }
 
+    async getPayables(): Promise<number> {
+        const response = await api.get('/purchases-invoices/payables');
+
+        if (response.data.result !== 'Success') {
+            throw new Error(response.data.message || 'Failed to fetch supplier payables');
+        }
+
+        return Number(response.data.data.total_payables);
+    }
+
     /**
      * Pay invoice
      */

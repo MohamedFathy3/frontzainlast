@@ -280,8 +280,10 @@ const StockMatrixGrid: React.FC<StockMatrixGridProps> = ({
                     <div className="flex items-center gap-2">
                       {color?.hex_code && (
                         <span 
-                          className="w-5 h-5 rounded-full border border-border flex-shrink-0"
+                          className="w-6 h-6 rounded-full border-2 border-slate-400 ring-1 ring-white shadow-sm flex-shrink-0"
                           style={{ backgroundColor: color.hex_code }}
+                          title={`${color.name}: ${color.hex_code}`}
+                          aria-label={`${color.name} (${color.hex_code})`}
                         />
                       )}
                       <span className="text-sm font-medium whitespace-nowrap">

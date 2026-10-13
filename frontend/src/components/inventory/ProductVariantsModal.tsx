@@ -30,6 +30,7 @@ interface ProductVariant {
     color_id: number;
     color: string;
     stock: number;
+    hex_code?: string | null;
   }>;
 }
 
@@ -104,7 +105,7 @@ const ProductVariantsModal: React.FC<ProductVariantsModalProps> = ({
           id: color.color_id.toString(),
           name: color.color,
           name_ar: color.color,
-          hex_code: getColorHex(color.color)
+          hex_code: color.hex_code || getColorHex(color.color)
         }
       }));
     }
@@ -155,11 +156,17 @@ const ProductVariantsModal: React.FC<ProductVariantsModalProps> = ({
   function getColorHex(colorName: string): string {
     const colorMap: Record<string, string> = {
       'أسود': '#000000',
+      'اسود': '#000000',
       'أبيض': '#FFFFFF',
+      'ابيض': '#FFFFFF',
       'أحمر': '#FF0000',
+      'احمر': '#FF0000',
       'أخضر': '#00FF00',
+      'اخضر': '#00FF00',
       'أزرق': '#0000FF',
+      'ازرق': '#0000FF',
       'أصفر': '#FFFF00',
+      'اصفر': '#FFFF00',
       'بنفسجي': '#800080',
       'وردي': '#FFC0CB',
       'رمادي': '#808080',

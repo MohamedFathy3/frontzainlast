@@ -349,6 +349,8 @@ const POSPaymentModal: React.FC<PaymentModalProps> = ({
             price: item.price,
             color: item.colorName || null,
             size: item.sizeName || null,
+            unit_id: item.unitId || null,
+            color_id: item.colorId || null,
             discount_amount: totalDiscountAmount
           })),
           discount_percentage: totalDiscountPercentage,
@@ -392,13 +394,10 @@ const POSPaymentModal: React.FC<PaymentModalProps> = ({
           }
         } else {
           response = await api.post('/invoice/store', invoiceData);
-
-          if (!response.ok) {
-            const errorData = await response.json();
-            throw new Error(errorData.message || 'Failed to create invoice');
-          }
-
           const result = response.data;
+          if (result?.status === false || result?.result === 'Error') {
+            throw new Error(result.message || 'Failed to create invoice');
+          }
           console.log('📦 Server response:', result);
           
           invoiceId = result.data?.id || `INV-${Date.now()}`;
