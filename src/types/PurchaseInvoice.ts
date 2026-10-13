@@ -89,6 +89,7 @@ export interface PurchaseInvoice {
   tax_total: number;
   total_amount: number;
   paid_amount: number;
+  returned_amount?: number;
   remaining_amount: number;
   items: PurchaseInvoiceItem[];
   created_at: string;

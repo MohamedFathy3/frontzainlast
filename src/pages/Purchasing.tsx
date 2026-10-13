@@ -52,6 +52,7 @@ interface InvoiceTableRow {
   due_date: string;
   items_count: number;
   paid_amount: number;
+  returned_amount: number;
   remaining_amount: number;
 }
 
@@ -158,6 +159,7 @@ const Purchasing = () => {
     due_date: invoice.due_date,
     items_count: invoice.items?.length || 0,
     paid_amount: invoice.paid_amount,
+    returned_amount: Number(invoice.returned_amount || 0),
     remaining_amount: invoice.remaining_amount,
   }));
 
@@ -497,6 +499,7 @@ const Purchasing = () => {
                         <TableHead>{language === 'ar' ? 'الخزينة' : 'Treasury'}</TableHead>
                         <TableHead>{language === 'ar' ? 'المبلغ' : 'Amount'}</TableHead>
                         <TableHead>{language === 'ar' ? 'المدفوع' : 'Paid'}</TableHead>
+                        <TableHead>{language === 'ar' ? 'المرتجع' : 'Returned'}</TableHead>
                         <TableHead>{language === 'ar' ? 'الخصم' : 'Discount'}</TableHead>
                         <TableHead>{language === 'ar' ? 'المتبقي' : 'Remaining'}</TableHead>
                         <TableHead>{language === 'ar' ? 'طريقة الدفع' : 'Payment'}</TableHead>
@@ -508,7 +511,7 @@ const Purchasing = () => {
                     <TableBody>
                       {invoicesLoading ? (
                         <TableRow>
-                          <TableCell colSpan={11} className="text-center py-8">
+                          <TableCell colSpan={12} className="text-center py-8">
                             <div className="flex justify-center">
                               <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
                             </div>
@@ -516,7 +519,7 @@ const Purchasing = () => {
                         </TableRow>
                       ) : invoicesList.length === 0 ? (
                         <TableRow>
-                          <TableCell colSpan={11} className="text-center py-8 text-muted-foreground">
+                          <TableCell colSpan={12} className="text-center py-8 text-muted-foreground">
                             {language === 'ar' ? 'لا توجد فواتير' : 'No invoices yet'}
                           </TableCell>
                         </TableRow>
@@ -529,6 +532,7 @@ const Purchasing = () => {
                             <TableCell>{inv.treasury_name}</TableCell>
                             <TableCell>{inv.total_amount.toLocaleString()} YER</TableCell>
                             <TableCell className="text-green-600">{inv.paid_amount.toLocaleString()} YER</TableCell>
+                            <TableCell className="text-orange-600">{inv.returned_amount.toLocaleString()} YER</TableCell>
                             <TableCell className="text-red-500 font-medium">
                               -{inv.discount_total?.toLocaleString() || 0} YER
                             </TableCell>

@@ -35,6 +35,8 @@ interface PurchaseInvoice {
   currency_id?: number;
   warehouse_id?: number;
   payment_method?: string;
+  paid_amount?: number;
+  returned_amount?: number;
   items: Array<{
     product_id: number;
     product_name: string;
@@ -49,6 +51,7 @@ interface PurchaseInvoice {
 }
 
 interface ReturnItem {
+  line_key: string;
   product_id: number;
   product_name: string;
   max_quantity: number;
@@ -58,6 +61,15 @@ interface ReturnItem {
   unit_name?: string;
   color_id?: number;
   color_name?: string;
+}
+
+interface PriorPurchaseReturn {
+  items?: Array<{
+    product_id: number;
+    product_unit_id?: number | null;
+    color_id?: number | null;
+    quantity: number;
+  }>;
 }
 
 const PurchaseReturnForm: React.FC<PurchaseReturnFormProps> = ({
@@ -86,6 +98,19 @@ const PurchaseReturnForm: React.FC<PurchaseReturnFormProps> = ({
       throw new Error(response.data.message || 'Failed to fetch invoice');
     },
     enabled: isOpen && !!invoiceId,
+  });
+
+  const { data: previousReturns, isLoading: returnsLoading, isFetching: returnsFetching, isError: returnsError } = useQuery<PriorPurchaseReturn[]>({
+    queryKey: ['purchase-returns', invoiceId],
+    queryFn: async () => {
+      const response = await api.post('/purchase-returns/index', {
+        filters: { purchase_invoices_id: invoiceId },
+        paginate: false,
+      });
+      return response.data.data || [];
+    },
+    enabled: isOpen && !!invoiceId,
+    refetchOnMount: 'always',
   });
 
   // ========== جلب الخزنات ==========
@@ -129,18 +154,34 @@ const PurchaseReturnForm: React.FC<PurchaseReturnFormProps> = ({
 
   // Update items when invoice data loads
   useEffect(() => {
-    if (invoice?.items) {
-      setItems(invoice.items.map(item => ({
+    if (invoice?.items && previousReturns && !returnsLoading && !returnsFetching) {
+      const returnedByVariant = new Map<string, number>();
+      previousReturns.forEach((purchaseReturn) => {
+        (purchaseReturn.items || []).forEach((returnedItem) => {
+          const key = [returnedItem.product_id, returnedItem.product_unit_id ?? 'none', returnedItem.color_id ?? 'none'].join(':');
+          returnedByVariant.set(key, (returnedByVariant.get(key) || 0) + Number(returnedItem.quantity || 0));
+        });
+      });
+
+      setItems(invoice.items.map((item, index) => {
+        const variantKey = [item.product_id, item.product_unit_id ?? 'none', item.color_id ?? 'none'].join(':');
+        const pendingReturns = returnedByVariant.get(variantKey) || 0;
+        const alreadyAllocated = Math.min(Number(item.quantity), pendingReturns);
+        returnedByVariant.set(variantKey, pendingReturns - alreadyAllocated);
+
+        return {
+        line_key: `${variantKey}:${index}`,
         product_id: item.product_id,
         product_name: language === 'ar' ? (item.product_name_ar || item.product_name) : item.product_name,
-        max_quantity: item.quantity,
+        max_quantity: Math.max(0, Number(item.quantity) - alreadyAllocated),
         quantity: 0,
         unit_price: parseFloat(item.price),
         product_unit_id: item.product_unit_id,
         unit_name: item.unit_name,
         color_id: item.color_id,
         color_name: item.color_name,
-      })));
+      };
+      }));
     }
     setReason('');
     
@@ -150,11 +191,11 @@ const PurchaseReturnForm: React.FC<PurchaseReturnFormProps> = ({
       setWarehouseId(invoice.warehouse_id?.toString() || '');
       setPaymentMethod(invoice.payment_method || 'cash');
     }
-  }, [invoice, language]);
+  }, [invoice, language, previousReturns, returnsLoading, returnsFetching]);
 
-  const updateItemQuantity = (productId: number, quantity: number) => {
+  const updateItemQuantity = (lineKey: string, quantity: number) => {
     setItems(prev => prev.map(item =>
-      item.product_id === productId
+      item.line_key === lineKey
         ? { ...item, quantity: Math.min(quantity, item.max_quantity) }
         : item
     ));
@@ -163,6 +204,7 @@ const PurchaseReturnForm: React.FC<PurchaseReturnFormProps> = ({
   const selectedItems = items.filter(item => item.quantity > 0);
   const totalAmount = selectedItems.reduce((sum, item) => sum + (item.quantity * item.unit_price), 0);
   const hasItems = selectedItems.length > 0;
+  const needsCashRefund = Number(invoice?.paid_amount || 0) > 0 && invoice?.payment_method === 'cash';
 
   // ========== إنشاء مرتجع ==========
   const createReturnMutation = useMutation({
@@ -202,6 +244,8 @@ const PurchaseReturnForm: React.FC<PurchaseReturnFormProps> = ({
       });
 
       queryClient.invalidateQueries({ queryKey: ['purchase-returns'] });
+      queryClient.invalidateQueries({ queryKey: ['purchase-invoices'] });
+      queryClient.invalidateQueries({ queryKey: ['purchase-invoice', invoiceId] });
       onSave();
     },
     onError: (error: any) => {
@@ -224,7 +268,7 @@ const PurchaseReturnForm: React.FC<PurchaseReturnFormProps> = ({
       return;
     }
 
-    if (!treasuryId) {
+    if (needsCashRefund && !treasuryId) {
       toast({
         title: language === 'ar' ? 'خطأ' : 'Error',
         description: language === 'ar' ? 'يرجى اختيار الخزنة' : 'Please select a treasury',
@@ -233,7 +277,7 @@ const PurchaseReturnForm: React.FC<PurchaseReturnFormProps> = ({
       return;
     }
 
-    if (!currencyId) {
+    if (needsCashRefund && !currencyId) {
       toast({
         title: language === 'ar' ? 'خطأ' : 'Error',
         description: language === 'ar' ? 'يرجى اختيار العملة' : 'Please select a currency',
@@ -257,7 +301,7 @@ const PurchaseReturnForm: React.FC<PurchaseReturnFormProps> = ({
     return '-';
   };
 
-  if (isOpen && invoiceLoading) {
+  if (isOpen && (invoiceLoading || returnsLoading || returnsFetching)) {
     return (
       <Dialog open={isOpen} onOpenChange={(open) => !open && handleClose()}>
         <DialogContent className="max-w-3xl">
@@ -307,7 +351,8 @@ const PurchaseReturnForm: React.FC<PurchaseReturnFormProps> = ({
               </CardContent>
             </Card>
 
-            {/* الخزنة والعملة والمخزن */}
+            {/* لا توجد حركة نقدية عند مرتجع فاتورة لم يُدفع منها شيء */}
+            {needsCashRefund ? (
             <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
               <div className="space-y-2">
                 <Label className="flex items-center gap-2">
@@ -380,6 +425,17 @@ const PurchaseReturnForm: React.FC<PurchaseReturnFormProps> = ({
                 </Select>
               </div>
             </div>
+            ) : (
+              <div className="rounded-md border border-blue-200 bg-blue-50 p-3 text-sm text-blue-800">
+                {language === 'ar'
+                  ? (Number(invoice.paid_amount || 0) <= 0
+                    ? 'الفاتورة غير مدفوعة: قيمة المرتجع ستُخصم من مستحقات المورد ولن تُسجّل حركة رد نقدية.'
+                    : 'قيمة المرتجع ستُخصم من حساب المورد، ولن تُسجّل حركة رد نقدية لهذه الفاتورة.')
+                  : (Number(invoice.paid_amount || 0) <= 0
+                    ? 'This invoice is unpaid: the return will reduce the supplier balance and will not create a cash refund.'
+                    : 'The return will be applied to the supplier balance; no cash refund will be recorded for this invoice.')}
+              </div>
+            )}
 
             {/* Reason */}
             <div className="space-y-2">
@@ -399,7 +455,13 @@ const PurchaseReturnForm: React.FC<PurchaseReturnFormProps> = ({
                 {language === 'ar' ? 'المنتجات المرتجعة' : 'Return Items'}
               </Label>
 
-              {items.length === 0 ? (
+              {returnsError ? (
+                <div className="rounded-md border border-red-200 bg-red-50 p-4 text-center text-sm text-red-700">
+                  {language === 'ar'
+                    ? 'تعذر تحميل سجل المرتجعات السابقة. أعد فتح النموذج أو حاول مرة أخرى.'
+                    : 'Could not load prior returns. Reopen the form or try again.'}
+                </div>
+              ) : items.length === 0 ? (
                 <div className="text-center py-8 text-muted-foreground">
                   {language === 'ar' ? 'لا توجد منتجات في هذه الفاتورة' : 'No items in this invoice'}
                 </div>
@@ -420,7 +482,7 @@ const PurchaseReturnForm: React.FC<PurchaseReturnFormProps> = ({
                       </TableHeader>
                       <TableBody>
                         {items.map((item) => (
-                          <TableRow key={item.product_id}>
+                          <TableRow key={item.line_key}>
                             <TableCell className="font-medium">{item.product_name}</TableCell>
                             <TableCell className="text-center">{item.unit_name || '-'}</TableCell>
                             <TableCell className="text-center">{item.color_name || '-'}</TableCell>
@@ -431,7 +493,8 @@ const PurchaseReturnForm: React.FC<PurchaseReturnFormProps> = ({
                                 min="0"
                                 max={item.max_quantity}
                                 value={item.quantity}
-                                onChange={(e) => updateItemQuantity(item.product_id, parseInt(e.target.value) || 0)}
+                                disabled={item.max_quantity <= 0}
+                                onChange={(e) => updateItemQuantity(item.line_key, parseInt(e.target.value) || 0)}
                                 className="w-20 text-center mx-auto h-8"
                               />
                             </TableCell>
