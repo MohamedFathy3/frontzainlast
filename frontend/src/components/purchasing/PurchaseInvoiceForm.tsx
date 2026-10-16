@@ -71,6 +71,7 @@ const PurchaseInvoiceForm: React.FC<PurchaseInvoiceFormProps> = ({
   // States for API data fetching
   const [loadingInvoice, setLoadingInvoice] = useState(false);
   const [fullInvoiceData, setFullInvoiceData] = useState<any>(null);
+  const loadedInvoiceIdRef = useRef<number | null>(null);
 
   const isEditMode = !!invoiceToEdit;
 
@@ -197,14 +198,23 @@ const PurchaseInvoiceForm: React.FC<PurchaseInvoiceFormProps> = ({
 
   // ========== Load data when fullInvoiceData is available ==========
   useEffect(() => {
-    if (fullInvoiceData && isEditMode && !loadingInvoice) {
+    const invoiceId = invoiceToEdit?.id;
+    if (
+      fullInvoiceData &&
+      isEditMode &&
+      !loadingInvoice &&
+      invoiceId &&
+      loadedInvoiceIdRef.current !== invoiceId
+    ) {
       // Delay to ensure dropdowns are loaded
       const timer = setTimeout(() => {
+        if (loadedInvoiceIdRef.current === invoiceId) return;
         loadInvoiceDataFromApi(fullInvoiceData);
+        loadedInvoiceIdRef.current = invoiceId;
       }, 200);
       return () => clearTimeout(timer);
     }
-  }, [fullInvoiceData, isEditMode, loadingInvoice, loadInvoiceDataFromApi]);
+  }, [fullInvoiceData, isEditMode, invoiceToEdit?.id, loadingInvoice, loadInvoiceDataFromApi]);
 
   // ========== Set default currency and tax for new invoice ==========
   useEffect(() => {
