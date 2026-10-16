@@ -38,6 +38,7 @@ interface ExpenseManagerProps {
 
 interface Expense {
   id: number;
+  purchase_invoice_id?: number | null;
   category: string;
   amount: string;
   formatted_amount: string;
@@ -133,6 +134,7 @@ const ExpenseManager: React.FC<ExpenseManagerProps> = ({ language }) => {
     { value: 'utilities', label: language === 'ar' ? 'مرافق' : 'Utilities', color: 'bg-green-500' },
     { value: 'salaries', label: language === 'ar' ? 'رواتب' : 'Salaries', color: 'bg-yellow-500' },
     { value: 'supplies', label: language === 'ar' ? 'مستلزمات' : 'Supplies', color: 'bg-purple-500' },
+    { value: 'purchases', label: language === 'ar' ? 'مشتريات' : 'Purchases', color: 'bg-violet-500' },
     { value: 'marketing', label: language === 'ar' ? 'تسويق' : 'Marketing', color: 'bg-pink-500' },
     { value: 'maintenance', label: language === 'ar' ? 'صيانة' : 'Maintenance', color: 'bg-cyan-500' },
     { value: 'transport', label: language === 'ar' ? 'نقل' : 'Transport', color: 'bg-orange-500' },
@@ -298,21 +300,29 @@ const ExpenseManager: React.FC<ExpenseManagerProps> = ({ language }) => {
   };
 
   const handleDeleteSelected = () => {
-    if (selectedItems.length === 0) {
+    const deletableItems = expenses
+      .filter((expense: Expense) => selectedItems.includes(expense.id) && !expense.purchase_invoice_id)
+      .map((expense: Expense) => expense.id);
+
+    if (deletableItems.length === 0) {
       toast.error(language === 'ar' ? 'لم يتم تحديد أي عناصر' : 'No items selected');
       return;
     }
 
-    if (window.confirm(language === 'ar' ? `هل أنت متأكد من حذف ${selectedItems.length} مصروف؟` : `Are you sure you want to delete ${selectedItems.length} expenses?`)) {
-      deleteMutation.mutate(selectedItems);
+    if (window.confirm(language === 'ar' ? `هل أنت متأكد من حذف ${deletableItems.length} مصروف؟` : `Are you sure you want to delete ${deletableItems.length} expenses?`)) {
+      deleteMutation.mutate(deletableItems);
     }
   };
 
   const handleSelectAll = () => {
-    if (selectedItems.length === expenses.length) {
+    const deletableItems = expenses
+      .filter((expense: Expense) => !expense.purchase_invoice_id)
+      .map((expense: Expense) => expense.id);
+
+    if (deletableItems.every(id => selectedItems.includes(id))) {
       setSelectedItems([]);
     } else {
-      setSelectedItems(expenses.map((exp: any) => exp.id));
+      setSelectedItems(deletableItems);
     }
   };
 
@@ -475,6 +485,7 @@ const ExpenseManager: React.FC<ExpenseManagerProps> = ({ language }) => {
                           type="checkbox" 
                           checked={selectedItems.includes(expense.id)}
                           onChange={() => handleSelectItem(expense.id)}
+                          disabled={Boolean(expense.purchase_invoice_id)}
                           className="rounded border-gray-300"
                         />
                       </TableCell>
@@ -491,12 +502,20 @@ const ExpenseManager: React.FC<ExpenseManagerProps> = ({ language }) => {
                       </TableCell>
                       <TableCell className="text-right">
                         <div className="flex items-center justify-end gap-2">
-                          <Button variant="ghost" size="icon" onClick={() => handleEdit(expense)}>
-                            <Edit className="h-4 w-4" />
-                          </Button>
-                          <Button variant="ghost" size="icon" className="text-red-600" onClick={() => handleDelete(expense.id)}>
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
+                          {expense.purchase_invoice_id ? (
+                            <span className="text-xs text-muted-foreground">
+                              {language === 'ar' ? 'مرتبط بفاتورة مشتريات' : 'Managed by purchase invoice'}
+                            </span>
+                          ) : (
+                            <>
+                              <Button variant="ghost" size="icon" onClick={() => handleEdit(expense)}>
+                                <Edit className="h-4 w-4" />
+                              </Button>
+                              <Button variant="ghost" size="icon" className="text-red-600" onClick={() => handleDelete(expense.id)}>
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </>
+                          )}
                         </div>
                       </TableCell>
                     </TableRow>

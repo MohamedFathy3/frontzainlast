@@ -398,6 +398,7 @@ const FinanceDashboard: React.FC<FinanceDashboardProps> = ({ language }) => {
     utilities: { en: 'Utilities', ar: 'مرافق', color: '#10b981' },
     salaries: { en: 'Salaries', ar: 'رواتب', color: '#f59e0b' },
     supplies: { en: 'Supplies', ar: 'مستلزمات', color: '#8b5cf6' },
+    purchases: { en: 'Purchases', ar: 'مشتريات', color: '#7c3aed' },
     marketing: { en: 'Marketing', ar: 'تسويق', color: '#ec4899' },
     maintenance: { en: 'Maintenance', ar: 'صيانة', color: '#06b6d4' },
     other: { en: 'Other', ar: 'أخرى', color: '#6b7280' }

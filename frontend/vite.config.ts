@@ -10,7 +10,7 @@ export default defineConfig(({ mode }) => ({
     port: 7000, 
     proxy: {
       "/api": {
-        target: "http://127.0.0.1:8000",
+        target: "https://pfs.injazyemen.cloud",
         changeOrigin: true,
         secure: true,
         rewrite: (path) => path.replace(/^\/api/, "/api"),
@@ -29,7 +29,7 @@ export default defineConfig(({ mode }) => ({
         },
       },
       "/sanctum": {
-        target: "http://127.0.0.1:8000",
+        target: "https://pfs.injazyemen.cloud",
         changeOrigin: true,
         secure: true,
         configure: (proxy, _options) => {
@@ -47,20 +47,17 @@ export default defineConfig(({ mode }) => ({
     },
   },
   // 🔽 إضافة هذا القسم لحل المشكلة
-  preview: {
-    host: "::",
-    port: 7000,
-    allowedHosts: [
-      'injazyemen.cloud',
-      'localhost',
-      '127.0.0.1',
-      
-      '::1',
-      '.injazyemen.cloud' // للسماح بالنطاقات الفرعية أيضاً
-    ]
-  },
-
-  
+ preview: {
+  host: "::",
+  port: 7100,
+  allowedHosts: [
+    'zain-pos.pro',
+    '.zain-pos.pro',   // leading dot also allows all subdomains
+    'localhost',
+    '127.0.0.1',
+    '::1',
+  ],
+},
   plugins: [react(), mode === "development" && componentTagger()].filter(Boolean),
   resolve: {
     alias: {

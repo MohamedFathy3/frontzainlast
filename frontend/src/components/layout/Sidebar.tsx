@@ -7,7 +7,7 @@ import { getAllowedPages } from '@/config/permissions';
 import { cn } from '@/lib/utils';
 import * as Icons from 'lucide-react';
 import logoIcon from '@/assets/logo-icon.png';
-import logoFull from '@/assets/logo-full.png';
+import logoFull from '@/assets/logo-icon.png';
 import { toast } from 'sonner'; // ✅ لإظهار رسالة عند تسجيل الخروج
 
 interface NavItemProps {

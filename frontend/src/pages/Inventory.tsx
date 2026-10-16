@@ -117,7 +117,7 @@ export const transformApiProductToFormData = (apiProduct: any): ProductFormData 
     categoryId: categoryId,
     price: Number(apiProduct.price) || 0,
     cost: Number(apiProduct.cost) || 0,
-    hasVariants: apiProduct.has_variants || false,
+    hasVariants: Boolean(apiProduct.has_variants) || (Array.isArray(apiProduct.units) && apiProduct.units.length > 0),
     variants: variants,
     selectedSizes: selectedSizes,
     selectedColors: selectedColors,

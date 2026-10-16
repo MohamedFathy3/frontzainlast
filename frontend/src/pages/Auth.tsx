@@ -11,7 +11,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { toast } from '@/hooks/use-toast';
 import { Loader2, LogIn, UserPlus, Mail, Lock, User, Globe, Upload } from 'lucide-react';
 import { z } from 'zod';
-import logoFull from '@/assets/logo-full.png';
+import logoFull from '@/assets/logo-icon.png';
 import FileUploader from '@/components/FileUploader';
 import {
   DropdownMenu,

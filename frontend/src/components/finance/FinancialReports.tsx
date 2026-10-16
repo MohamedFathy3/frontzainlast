@@ -137,6 +137,7 @@ const FinancialReports: React.FC<FinancialReportsProps> = ({ language }) => {
     utilities: { en: 'Utilities', ar: 'مرافق' },
     salaries: { en: 'Salaries', ar: 'رواتب' },
     supplies: { en: 'Supplies', ar: 'مستلزمات' },
+    purchases: { en: 'Purchases', ar: 'مشتريات' },
     marketing: { en: 'Marketing', ar: 'تسويق' },
     maintenance: { en: 'Maintenance', ar: 'صيانة' },
     transport: { en: 'Transport', ar: 'نقل' },

@@ -40,7 +40,7 @@ export class PurchaseInvoiceValidator {
     // }
 
     
-    if (data.payment_method === 'cash' && data.paid_amount > 0 && !data.treasury_id) {
+    if (data.paid_amount > 0 && !data.treasury_id) {
       errors.treasury_id = language === 'ar' ? 'يرجى اختيار الخزينة' : 'Please select treasury';
     }
     
