@@ -98,7 +98,7 @@ const Auth = () => {
 
   const translations = {
     en: {
-      welcome: 'Welcome to INJAZ ERP',
+      welcome: 'Welcome to ZAIN ERP',
       loginTitle: 'Sign In',
       signupTitle: 'Create Account',
       loginDesc: 'Enter your credentials to access your account',
@@ -125,7 +125,7 @@ const Auth = () => {
       genericError: 'Something went wrong. Please try again.',
     },
     ar: {
-      welcome: 'مرحباً بك في نظام إنجاز',
+      welcome: 'مرحباً بك في نظام زين',
       loginTitle: 'تسجيل الدخول',
       signupTitle: 'إنشاء حساب',
       loginDesc: 'أدخل بياناتك للوصول إلى حسابك',

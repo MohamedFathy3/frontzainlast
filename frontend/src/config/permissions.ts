@@ -46,8 +46,8 @@ export const PAGES: PagePermission[] = [
   {
     id: 'sales',
     path: '/sales',
-    label: 'Sales',
-    labelAr: 'المبيعات',
+    label: 'Advanced Sales',
+    labelAr: 'مبيعات متقدمة',
     icon: 'Receipt',
     allowedRoles: ['admin', 'Manager', 'Sales', 'Cashier', 'Accountant'],
   },

@@ -48,6 +48,7 @@ interface Shift {
   card_sales: string;
   wallet_sales: string;
   returns_amount: string;
+  expenses_amount: string;
   expected_amount: string | null;
   actual_amount: string | null;
   difference: string | null;
@@ -351,8 +352,9 @@ const ShiftsList: React.FC<ShiftsListProps> = ({ onClose }) => {
             <div class="print-row"><span>📱 ${language === 'ar' ? 'مبيعات محفظة:' : 'Wallet Sales:'}</span><span style="font-weight: bold;">${formatNumber(shift.wallet_sales)}</span></div>
             <div class="print-row"><span>💳 ${language === 'ar' ? 'مبيعات بطاقة:' : 'Card Sales:'}</span><span style="font-weight: bold;">${formatNumber(shift.card_sales)}</span></div>
             <div class="print-row"><span>↩️ ${language === 'ar' ? 'المرتجعات:' : 'Returns:'}</span><span style="font-weight: bold; color: #dc2626;">-${formatNumber(shift.returns_amount)}</span></div>
+            <div class="print-row"><span>📉 ${language === 'ar' ? 'المصروفات:' : 'Expenses:'}</span><span style="font-weight: bold; color: #ea580c;">-${formatNumber(shift.expenses_amount || 0)}</span></div>
             <hr/>
-            <div class="print-row"><span style="font-weight: bold;">📦 ${language === 'ar' ? 'إجمالي المبيعات:' : 'Total Sales:'}</span><span style="font-weight: bold;">${formatNumber(parseFloat(shift.cash_sales || '0') + parseFloat(shift.wallet_sales || '0') + parseFloat(shift.card_sales || '0') - parseFloat(shift.returns_amount || '0'))}</span></div>
+            <div class="print-row"><span style="font-weight: bold;">📦 ${language === 'ar' ? 'صافي الوردية:' : 'Net Shift:'}</span><span style="font-weight: bold;">${formatNumber(parseFloat(shift.opening_balance || '0') + parseFloat(shift.cash_sales || '0') + parseFloat(shift.wallet_sales || '0') + parseFloat(shift.card_sales || '0') - parseFloat(shift.returns_amount || '0') - parseFloat(shift.expenses_amount || '0'))}</span></div>
           </div>
 
           <div class="print-section">
@@ -692,6 +694,7 @@ const ShiftsList: React.FC<ShiftsListProps> = ({ onClose }) => {
                 <div className="p-3 bg-purple-500/5 rounded-lg"><p className="text-xs text-muted-foreground mb-1">{t.walletSales}</p><p className="text-xl font-bold text-purple-600">{formatNumber(selectedShift.wallet_sales)}</p></div>
                 <div className="p-3 bg-blue-500/5 rounded-lg"><p className="text-xs text-muted-foreground mb-1">{t.cardSales}</p><p className="text-xl font-bold text-blue-600">{formatNumber(selectedShift.card_sales)}</p></div>
                 <div className="p-3 bg-red-500/5 rounded-lg"><p className="text-xs text-muted-foreground mb-1 flex items-center gap-1"><Receipt size={12} className="text-red-600" />{t.returns}</p><p className="text-xl font-bold text-red-600">-{formatNumber(selectedShift.returns_amount)}</p></div>
+                <div className="p-3 bg-orange-500/5 rounded-lg"><p className="text-xs text-muted-foreground mb-1">{language === 'ar' ? 'المصروفات' : 'Expenses'}</p><p className="text-xl font-bold text-orange-600">-{formatNumber(selectedShift.expenses_amount || '0')}</p></div>
               </div>
               <div className="grid grid-cols-3 gap-3">
                 <div className="p-3 bg-amber-500/5 rounded-lg"><p className="text-xs text-muted-foreground mb-1">{t.expected}</p><p className="text-xl font-bold text-amber-600">{formatNumber(selectedShift.expected_amount)}</p></div>

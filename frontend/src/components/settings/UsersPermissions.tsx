@@ -857,7 +857,6 @@ const Employees = () => {
                 <Input
                   value={formData.name}
                   onChange={(e) => setFormData(prev => ({ ...prev, name: e.target.value }))}
-                  placeholder="Ahmed Abdullah"
                 />
               </div>
             </div>

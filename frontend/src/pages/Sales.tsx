@@ -17,7 +17,7 @@ const Sales = () => {
       <div className="space-y-6">
         <div>
           <h1 className="text-3xl font-bold text-foreground">
-            {language === 'ar' ? 'إدارة المبيعات' : 'Sales Management'}
+            {language === 'ar' ? 'إدارة المبيعات  المتقدمه' : 'Sales Management'}
           </h1>
           <p className="text-muted-foreground mt-1">
             {language === 'ar' 

@@ -418,7 +418,8 @@ const PurchaseInvoiceForm: React.FC<PurchaseInvoiceFormProps> = ({
 
       // Invalidate queries
       queryClient.invalidateQueries({ queryKey: ['purchase-invoices'] });
-      queryClient.invalidateQueries({ queryKey: ['products'] });
+      queryClient.invalidateQueries({ queryKey: ['inventory-products'] });
+      queryClient.invalidateQueries({ queryKey: ['products-for-purchase'] });
       queryClient.invalidateQueries({ queryKey: ['suppliers'] });
       queryClient.invalidateQueries({ queryKey: ['treasury'] });
 

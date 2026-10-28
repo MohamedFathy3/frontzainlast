@@ -10,7 +10,7 @@ export default defineConfig(({ mode }) => ({
     port: 7000, 
     proxy: {
       "/api": {
-        target: "https://pfs.injazyemen.cloud",
+          target: "http://127.0.0.1:8000",
         changeOrigin: true,
         secure: true,
         rewrite: (path) => path.replace(/^\/api/, "/api"),
@@ -29,7 +29,7 @@ export default defineConfig(({ mode }) => ({
         },
       },
       "/sanctum": {
-        target: "https://pfs.injazyemen.cloud",
+        target: "http://127.0.0.1:8000",
         changeOrigin: true,
         secure: true,
         configure: (proxy, _options) => {

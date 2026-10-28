@@ -33,6 +33,7 @@ import { ar } from 'date-fns/locale';
 import { cn } from '@/lib/utils';
 import api from '@/lib/api';
 import { useRegionalSettings } from '@/contexts/RegionalSettingsContext';
+import { useCurrencyTax } from '@/hooks/useCurrencyTax';
 
 // ========== أنواع البيانات ==========
 interface POSShift {
@@ -45,6 +46,7 @@ interface POSShift {
   card_sales: string;
   wallet_sales: string;
   returns_amount: string;
+  expenses_amount: string;
   expected_amount: string | null;
   actual_amount: string | null;
   difference: string | null;
@@ -69,14 +71,19 @@ interface CloseShiftPayload {
 interface POSShiftManagementProps {
   onShiftChange?: (shift: POSShift | null) => void;
   autoRefresh?: boolean;
+  openExpenseOnLoad?: boolean;
+  onExpenseDialogOpened?: () => void;
 }
 
 const POSShiftManagement: React.FC<POSShiftManagementProps> = ({ 
   onShiftChange, 
-  autoRefresh = true 
+  autoRefresh = true,
+  openExpenseOnLoad = false,
+  onExpenseDialogOpened,
 }) => {
   const { language } = useLanguage();
   const { formatCurrency } = useRegionalSettings();
+  const { defaultCurrency } = useCurrencyTax();
   const queryClient = useQueryClient();
   
   // ========== State ==========
@@ -84,9 +91,12 @@ const POSShiftManagement: React.FC<POSShiftManagementProps> = ({
   const [closeShiftModal, setCloseShiftModal] = useState(false);
   const [openingAmount, setOpeningAmount] = useState('');
   const [closingAmount, setClosingAmount] = useState('');
+  const [expenseAmount, setExpenseAmount] = useState('');
+  const [expenseDescription, setExpenseDescription] = useState('');
   const [openingNotes, setOpeningNotes] = useState('');
   const [closingNotes, setClosingNotes] = useState('');
   const [showSummary, setShowSummary] = useState(false);
+  const [expenseModalOpen, setExpenseModalOpen] = useState(false);
   
   // ========== جلب الوردية الحالية ==========
   const { 
@@ -110,6 +120,13 @@ const POSShiftManagement: React.FC<POSShiftManagementProps> = ({
     },
     refetchInterval: autoRefresh ? 30000 : false,
   });
+
+  useEffect(() => {
+    if (openExpenseOnLoad && currentShift) {
+      setExpenseModalOpen(true);
+      onExpenseDialogOpened?.();
+    }
+  }, [openExpenseOnLoad, currentShift, onExpenseDialogOpened]);
 
   // ========== فتح وردية جديدة ==========
   const openShiftMutation = useMutation({
@@ -159,7 +176,7 @@ const POSShiftManagement: React.FC<POSShiftManagementProps> = ({
         toast.success(language === 'ar' ? 'تم إغلاق الوردية بنجاح' : 'Shift closed successfully', {
           icon: <CheckCircle2 className="h-4 w-4" />,
         });
-        
+
         if (onShiftChange) {
           onShiftChange(null);
         }
@@ -170,6 +187,26 @@ const POSShiftManagement: React.FC<POSShiftManagementProps> = ({
     onError: (error: any) => {
       console.error('Error closing shift:', error);
       toast.error(error.response?.data?.message || (language === 'ar' ? 'حدث خطأ' : 'An error occurred'));
+    }
+  });
+
+  const addExpenseMutation = useMutation({
+    mutationFn: async (data: { amount: number; description: string }) => {
+      const response = await api.post('/shifts/expenses', data);
+      return response.data;
+    },
+    onSuccess: async (data) => {
+      setExpenseModalOpen(false);
+      setExpenseAmount('');
+      setExpenseDescription('');
+      toast.success(data.message || t.expenseRecorded);
+      await queryClient.invalidateQueries({ queryKey: ['shifts'] });
+      const result = await refetch();
+      onShiftChange?.(result.data || null);
+    },
+    onError: (error: any) => {
+      console.error('Error recording shift expense:', error);
+      toast.error(error.response?.data?.message || (language === 'ar' ? 'تعذر تسجيل المصروف' : 'Could not record expense'));
     }
   });
 
@@ -188,8 +225,9 @@ const POSShiftManagement: React.FC<POSShiftManagementProps> = ({
     const card = parseFloat(currentShift.card_sales || '0');
     const wallet = parseFloat(currentShift.wallet_sales || '0');
     const returns = parseFloat(currentShift.returns_amount || '0');
+    const expenses = parseFloat(currentShift.expenses_amount || '0');
     
-    return opening + cash + card + wallet - returns;
+    return opening + cash + card + wallet - returns - expenses;
   }, [currentShift]);
 
   // ========== حساب الفرق ==========
@@ -288,8 +326,9 @@ const printShift = (shift) => {
           <div class="print-row"><span>📱 ${language === 'ar' ? 'مبيعات محفظة:' : 'Wallet Sales:'}</span><span style="font-weight: bold;">${formatNumber(shift.wallet_sales)}</span></div>
           <div class="print-row"><span>💳 ${language === 'ar' ? 'مبيعات بطاقة:' : 'Card Sales:'}</span><span style="font-weight: bold;">${formatNumber(shift.card_sales)}</span></div>
           <div class="print-row"><span>↩️ ${language === 'ar' ? 'المرتجعات:' : 'Returns:'}</span><span style="font-weight: bold; color: #dc2626;">-${formatNumber(shift.returns_amount)}</span></div>
+          <div class="print-row"><span>📉 ${language === 'ar' ? 'المصروفات:' : 'Expenses:'}</span><span style="font-weight: bold; color: #ea580c;">-${formatNumber(shift.expenses_amount || 0)}</span></div>
           <hr/>
-          <div class="print-row"><span style="font-weight: bold;">📦 ${language === 'ar' ? 'إجمالي المبيعات:' : 'Total Sales:'}</span><span style="font-weight: bold;">${formatNumber(parseFloat(shift.cash_sales || '0') + parseFloat(shift.wallet_sales || '0') + parseFloat(shift.card_sales || '0') - parseFloat(shift.returns_amount || '0'))}</span></div>
+          <div class="print-row"><span style="font-weight: bold;">📦 ${language === 'ar' ? 'صافي الوردية:' : 'Net Shift:'}</span><span style="font-weight: bold;">${formatNumber(parseFloat(shift.opening_balance || '0') + parseFloat(shift.cash_sales || '0') + parseFloat(shift.wallet_sales || '0') + parseFloat(shift.card_sales || '0') - parseFloat(shift.returns_amount || '0') - parseFloat(shift.expenses_amount || '0'))}</span></div>
         </div>
 
         <div class="print-section">
@@ -384,6 +423,11 @@ const printShift = (shift) => {
       confirmClose: 'Are you sure you want to close this shift?',
       confirmOpen: 'Are you sure you want to open a new shift?',
       validAmount: 'Please enter a valid amount',
+      expenses: 'Expenses',
+      recordExpense: 'Record Expense',
+      expenseAmount: 'Expense Amount',
+      expenseDescription: 'Description',
+      expenseRecorded: 'Expense recorded successfully',
       cashSales: 'Cash Sales',
       cardSales: 'Card Sales',
       totalReturns: 'Total Returns',
@@ -435,6 +479,11 @@ const printShift = (shift) => {
       confirmClose: 'هل أنت متأكد من إغلاق هذه الوردية؟',
       confirmOpen: 'هل أنت متأكد من فتح وردية جديدة؟',
       validAmount: 'الرجاء إدخال مبلغ صحيح',
+      expenses: 'المصروفات',
+      recordExpense: 'تسجيل مصروف',
+      expenseAmount: 'قيمة المصروف',
+      expenseDescription: 'وصف المصروف',
+      expenseRecorded: 'تم تسجيل المصروف بنجاح',
       cashSales: 'مبيعات نقدية',
       cardSales: 'مبيعات بطاقة',
       totalReturns: 'إجمالي المرتجعات',
@@ -460,7 +509,7 @@ const printShift = (shift) => {
 
 const handleCloseShift = () => {
   const amount = parseFloat(closingAmount);
-  if (isNaN(amount) || amount < 0) {
+  if (isNaN(amount)) {
     toast.error(t.validAmount);
     return;
   }
@@ -551,7 +600,7 @@ const handleCloseShift = () => {
               </div>
             </div>
             
-            <div className="grid grid-cols-4 gap-2">
+            <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
               <div className="p-3 rounded-lg bg-emerald-100/50 dark:bg-emerald-900/20 text-center hover:scale-105 transition-all cursor-default">
                 <Banknote className="h-5 w-5 mx-auto mb-1 text-emerald-600" />
                 <div className="text-xs text-muted-foreground mb-1">{t.cash}</div>
@@ -572,6 +621,11 @@ const handleCloseShift = () => {
                 <div className="text-xs text-muted-foreground mb-1">{t.returns}</div>
                 <div className="font-bold text-red-700">{formatAmount(currentShift.returns_amount)}</div>
               </div>
+              <div className="p-3 rounded-lg bg-orange-100/50 dark:bg-orange-900/20 text-center">
+                <TrendingDown className="h-5 w-5 mx-auto mb-1 text-orange-600" />
+                <div className="text-xs text-muted-foreground mb-1">{t.expenses}</div>
+                <div className="font-bold text-orange-700">{formatAmount(currentShift.expenses_amount || 0)}</div>
+              </div>
             </div>
 
             <div className="flex items-center justify-between p-4 bg-gradient-to-r from-primary/10 to-primary/5 rounded-lg border border-primary/20">
@@ -588,6 +642,9 @@ const handleCloseShift = () => {
             )}
 
             <div className="flex gap-2">
+              <Button className="flex-1 gap-2" variant="outline" onClick={() => setExpenseModalOpen(true)}>
+                <TrendingDown className="h-4 w-4" />{t.recordExpense}
+              </Button>
               <Button className="flex-1 gap-2" variant="destructive" onClick={() => setCloseShiftModal(true)}>
                 <X className="h-4 w-4" />{t.closeShift}
               </Button>
@@ -602,7 +659,7 @@ const handleCloseShift = () => {
                   <div><span className="text-muted-foreground">{t.walletsales}:</span><div className="font-mono">{formatAmount(currentShift.wallet_sales)}</div></div>
                   <div><span className="text-muted-foreground">{t.totalReturns}:</span><div className="font-mono text-destructive">{formatAmount(currentShift.returns_amount)}</div></div>
                   <div className="col-span-2"><Separator /></div>
-                  <div className="col-span-2"><span className="text-muted-foreground">{t.netSales}:</span><div className="font-mono text-primary text-lg">{formatAmount(parseFloat(currentShift.cash_sales) + parseFloat(currentShift.card_sales) + parseFloat(currentShift.wallet_sales) - parseFloat(currentShift.returns_amount))}</div></div>
+                  <div className="col-span-2"><span className="text-muted-foreground">{t.netSales}:</span><div className="font-mono text-primary text-lg">{formatAmount(parseFloat(currentShift.cash_sales) + parseFloat(currentShift.card_sales) + parseFloat(currentShift.wallet_sales) - parseFloat(currentShift.returns_amount) - parseFloat(currentShift.expenses_amount || '0'))}</div></div>
                 </div>
               </div>
             )}
@@ -631,8 +688,8 @@ const handleCloseShift = () => {
             <div className="space-y-2">
               <Label htmlFor="opening-amount">{t.openingBalance} <span className="text-destructive">*</span></Label>
               <div className="relative">
-                <Input id="opening-amount" type="number" placeholder="0" value={openingAmount} onChange={(e) => setOpeningAmount(e.target.value)} className="text-left text-lg pl-16 h-12" dir="ltr" autoFocus />
-                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">ر.ي</span>
+                <Input id="opening-amount" type="number" step="any" placeholder="0" value={openingAmount} onChange={(e) => setOpeningAmount(e.target.value)} className="text-left text-lg pl-16 h-12" dir="ltr" autoFocus />
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">{defaultCurrency?.symbol}</span>
               </div>
             </div>
             <div className="space-y-2">
@@ -643,6 +700,57 @@ const handleCloseShift = () => {
           <DialogFooter className="gap-2">
             <Button variant="outline" onClick={() => setOpenShiftModal(false)}>{t.cancel}</Button>
             <Button onClick={handleOpenShift} disabled={openShiftMutation.isPending}>{openShiftMutation.isPending ? <><RefreshCw className="h-4 w-4 animate-spin" />{t.loading}</> : t.openShift}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Record Shift Expense Modal */}
+      <Dialog open={expenseModalOpen} onOpenChange={setExpenseModalOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <TrendingDown className="h-5 w-5 text-orange-600" />
+              {t.recordExpense}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="expense-amount">{t.expenseAmount}</Label>
+              <div className="relative">
+                <Input
+                  id="expense-amount"
+                  type="number"
+                  min="0.01"
+                  step="any"
+                  value={expenseAmount}
+                  onChange={(event) => setExpenseAmount(event.target.value)}
+                  className="text-left pl-16"
+                  dir="ltr"
+                />
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">{defaultCurrency?.symbol}</span>
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="expense-description">{t.expenseDescription}</Label>
+              <Textarea
+                id="expense-description"
+                value={expenseDescription}
+                onChange={(event) => setExpenseDescription(event.target.value)}
+                maxLength={255}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setExpenseModalOpen(false)}>{t.cancel}</Button>
+            <Button
+              onClick={() => addExpenseMutation.mutate({
+                amount: Number(expenseAmount),
+                description: expenseDescription.trim(),
+              })}
+              disabled={addExpenseMutation.isPending || Number(expenseAmount) <= 0 || !expenseDescription.trim()}
+            >
+              {addExpenseMutation.isPending ? t.loading : t.recordExpense}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -660,6 +768,7 @@ const handleCloseShift = () => {
                 <div className="flex justify-between text-blue-600"><span>+ {t.cardSales}:</span><span>+ {formatAmount(currentShift.card_sales)}</span></div>
                 <div className="flex justify-between text-purple-600"><span>+ {t.walletsales}:</span><span>+ {formatAmount(currentShift.wallet_sales)}</span></div>
                 <div className="flex justify-between text-red-600"><span>- {t.returns}:</span><span>- {formatAmount(currentShift.returns_amount)}</span></div>
+                <div className="flex justify-between text-orange-600"><span>- {t.expenses}:</span><span>- {formatAmount(currentShift.expenses_amount || 0)}</span></div>
                 <Separator />
                 <div className="flex justify-between font-bold text-lg"><span>{t.expectedAmount}:</span><span className="text-primary">{formatAmount(expectedAmount)}</span></div>
               </div>
@@ -667,8 +776,8 @@ const handleCloseShift = () => {
               <div className="space-y-2">
                 <Label htmlFor="closing-amount">{t.actualAmount} <span className="text-destructive">*</span></Label>
                 <div className="relative">
-                  <Input id="closing-amount" type="text" placeholder="0" value={closingAmount} onChange={(e) => setClosingAmount(e.target.value)} className="text-left text-lg pl-16 h-12" dir="ltr" autoFocus />
-                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">ر.ي</span>
+                  <Input id="closing-amount" type="number" step="any" placeholder="0" value={closingAmount} onChange={(e) => setClosingAmount(e.target.value)} className="text-left text-lg pl-16 h-12" dir="ltr" autoFocus />
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">{defaultCurrency?.symbol}</span>
                 </div>
               </div>
 

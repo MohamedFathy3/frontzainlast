@@ -11,7 +11,7 @@ import {
   Search, Barcode, Home, LogOut, Loader2, Crown, Clock, User, 
   Truck, RotateCcw, DollarSign, Building2, Wifi, WifiOff, RefreshCw,
   ShoppingBag, AlertCircle, CheckCircle2,
-  UserCheck
+  UserCheck, TrendingDown
 } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -147,6 +147,7 @@ const POS: React.FC = () => {
   const [currentShift, setCurrentShift] = useState<any>(null);
   const [showReturns, setShowReturns] = useState(false);
   const [showShiftPanel, setShowShiftPanel] = useState(false);
+  const [openExpenseOnShiftPanel, setOpenExpenseOnShiftPanel] = useState(false);
   const [selectedCartItemIndex, setSelectedCartItemIndex] = useState<number>(-1);
   const [isOffline, setIsOffline] = useState(!navigator.onLine);
   const [syncing, setSyncing] = useState(false);
@@ -984,6 +985,19 @@ const handlePaymentComplete = async (payments: { method: string; amount: number 
                 <DollarSign size={16} />
                 <span className="text-xs font-medium">{language === 'ar' ? 'الوردية' : 'Shift'}</span>
               </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  setOpenExpenseOnShiftPanel(true);
+                  setShowShiftPanel(true);
+                }}
+                disabled={!currentShift}
+                className="gap-1.5 px-2 text-orange-400 hover:text-orange-300 hover:bg-orange-500/20 disabled:opacity-40"
+              >
+                <TrendingDown size={16} />
+                <span className="text-xs font-medium">{language === 'ar' ? 'مصروفات' : 'Expenses'}</span>
+              </Button>
             </div>
 
             {/* Selected Customer Display */}
@@ -1353,11 +1367,15 @@ const handlePaymentComplete = async (payments: { method: string; amount: number 
           } : null}
         />
 
-        <Dialog open={showShiftPanel} onOpenChange={setShowShiftPanel}>
+        <Dialog open={showShiftPanel} onOpenChange={(open) => {
+          setShowShiftPanel(open);
+          if (!open) setOpenExpenseOnShiftPanel(false);
+        }}>
           <DialogContent className="sm:max-w-md">
             <POSShiftManagement
-              currentShift={currentShift}
               onShiftChange={setCurrentShift}
+              openExpenseOnLoad={openExpenseOnShiftPanel}
+              onExpenseDialogOpened={() => setOpenExpenseOnShiftPanel(false)}
             />
           </DialogContent>
         </Dialog>

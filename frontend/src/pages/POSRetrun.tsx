@@ -1210,7 +1210,6 @@ const POS: React.FC = () => {
         <Dialog open={showShiftPanel} onOpenChange={setShowShiftPanel}>
           <DialogContent className="sm:max-w-md">
             <POSShiftManagement
-              currentShift={currentShift}
               onShiftChange={handleShiftChange}
             />
           </DialogContent>
