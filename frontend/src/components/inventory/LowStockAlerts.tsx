@@ -1,302 +1,191 @@
-import React, { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { useLanguage } from '@/contexts/LanguageContext';
+import api from '@/lib/api';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { ScrollArea, ScrollBar } from '@/components/ui/scroll-area';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { supabase } from '@/integrations/supabase/client';
-import { toast } from '@/hooks/use-toast';
+import { AlertTriangle, Bell, BellOff, CheckCircle, Package, RefreshCw, XCircle } from 'lucide-react';
 import { formatDate } from '@/lib/utils';
-import { 
-  AlertTriangle, 
-  Bell, 
-  BellOff, 
-  CheckCircle, 
-  XCircle,
-  Package,
-  RefreshCw
-} from 'lucide-react';
+
+type SystemAlert = {
+  id: string;
+  category: 'low_stock' | 'out_of_stock' | 'overdue_payable' | string;
+  type: 'warning' | 'error' | string;
+  title: string;
+  title_en: string;
+  message: string;
+  message_en: string;
+  product_name: string | null;
+  sku: string | null;
+  barcode: string | null;
+  warehouse_name: string | null;
+  current_quantity: number;
+  threshold_quantity: number;
+  reference_type: string;
+  reference_id: number;
+  created_at: string;
+};
+
+type AlertStatuses = Record<string, { read?: boolean; resolved?: boolean }>;
+const STORAGE_KEY = 'system-alert-status-v1';
+
+const readStatuses = (): AlertStatuses => {
+  try {
+    return JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}') as AlertStatuses;
+  } catch {
+    return {};
+  }
+};
 
 const LowStockAlerts = () => {
   const { language } = useLanguage();
-  const queryClient = useQueryClient();
+  const isArabic = language === 'ar';
   const [showResolved, setShowResolved] = useState(false);
+  const [statuses, setStatuses] = useState<AlertStatuses>(readStatuses);
 
-  const t = {
-    en: {
-      title: 'Low Stock Alerts',
-      description: 'Monitor products with low stock levels',
-      product: 'Product',
-      sku: 'SKU',
-      currentStock: 'Current Stock',
-      threshold: 'Threshold',
-      type: 'Type',
-      createdAt: 'Created At',
-      status: 'Status',
-      actions: 'Actions',
-      lowStock: 'Low Stock',
-      outOfStock: 'Out of Stock',
-      overstock: 'Overstock',
-      markResolved: 'Mark Resolved',
-      markRead: 'Mark Read',
-      unread: 'Unread',
-      read: 'Read',
-      resolved: 'Resolved',
-      showResolved: 'Show Resolved',
-      refresh: 'Refresh',
-      noAlerts: 'No alerts found',
-      alertResolved: 'Alert marked as resolved',
-      alertRead: 'Alert marked as read',
-      unreadAlerts: 'Unread Alerts',
-      totalAlerts: 'Total Alerts'
-    },
-    ar: {
-      title: 'تنبيهات انخفاض المخزون',
-      description: 'مراقبة المنتجات ذات المخزون المنخفض',
-      product: 'المنتج',
-      sku: 'رمز المنتج',
-      currentStock: 'المخزون الحالي',
-      threshold: 'الحد',
-      type: 'النوع',
-      createdAt: 'تاريخ الإنشاء',
-      status: 'الحالة',
-      actions: 'الإجراءات',
-      lowStock: 'مخزون منخفض',
-      outOfStock: 'نفاد المخزون',
-      overstock: 'مخزون زائد',
-      markResolved: 'تحديد كمحلول',
-      markRead: 'تحديد كمقروء',
-      unread: 'غير مقروء',
-      read: 'مقروء',
-      resolved: 'محلول',
-      showResolved: 'إظهار المحلولة',
-      refresh: 'تحديث',
-      noAlerts: 'لا توجد تنبيهات',
-      alertResolved: 'تم تحديد التنبيه كمحلول',
-      alertRead: 'تم تحديد التنبيه كمقروء',
-      unreadAlerts: 'تنبيهات غير مقروءة',
-      totalAlerts: 'إجمالي التنبيهات'
-    }
-  }[language];
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(statuses));
+  }, [statuses]);
 
-  // Fetch alerts with product data
-  const { data: alerts = [], refetch } = useQuery({
-    queryKey: ['low-stock-alerts', showResolved],
+  const { data: alerts = [], isLoading, isFetching, isError, error, refetch } = useQuery<SystemAlert[]>({
+    queryKey: ['system-alerts'],
     queryFn: async () => {
-      let query = supabase
-        .from('low_stock_alerts')
-        .select('*, products(name, name_ar, sku)')
-        .order('created_at', { ascending: false });
-      
-      if (!showResolved) {
-        query = query.eq('is_resolved', false);
+      const response = await api.get('/system/alerts', { params: { limit: 300 } });
+      if (response.data?.result !== 'Success') {
+        throw new Error(response.data?.message || (isArabic ? 'تعذر تحميل التنبيهات' : 'Could not load alerts'));
       }
-      
-      const { data, error } = await query;
-      if (error) throw error;
-      return data;
-    }
-  });
-
-  // Mark as read mutation
-  const markReadMutation = useMutation({
-    mutationFn: async (alertId: string) => {
-      const { error } = await supabase
-        .from('low_stock_alerts')
-        .update({ is_read: true })
-        .eq('id', alertId);
-      if (error) throw error;
+      return response.data.data || [];
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['low-stock-alerts'] });
-      toast({ title: t.alertRead });
-    }
+    refetchInterval: 60_000,
+    refetchOnWindowFocus: true,
   });
 
-  // Mark as resolved mutation
-  const markResolvedMutation = useMutation({
-    mutationFn: async (alertId: string) => {
-      const { error } = await supabase
-        .from('low_stock_alerts')
-        .update({ is_resolved: true, resolved_at: new Date().toISOString() })
-        .eq('id', alertId);
-      if (error) throw error;
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['low-stock-alerts'] });
-      toast({ title: t.alertResolved });
-    }
-  });
+  const visibleAlerts = useMemo(() => alerts.filter((alert) => showResolved || !statuses[alert.id]?.resolved), [alerts, showResolved, statuses]);
+  const unreadCount = alerts.filter((alert) => !statuses[alert.id]?.read && !statuses[alert.id]?.resolved).length;
+  const totalCount = visibleAlerts.length;
 
-  const getAlertTypeBadge = (type: string) => {
-    const config = {
-      low_stock: { label: t.lowStock, variant: 'secondary' as const, icon: AlertTriangle },
-      out_of_stock: { label: t.outOfStock, variant: 'destructive' as const, icon: XCircle },
-      overstock: { label: t.overstock, variant: 'default' as const, icon: Package }
-    };
-    const alertConfig = config[type as keyof typeof config] || config.low_stock;
-    const Icon = alertConfig.icon;
-    return (
-      <Badge variant={alertConfig.variant} className="gap-1">
-        <Icon size={12} />
-        {alertConfig.label}
-      </Badge>
-    );
+  const text = {
+    title: isArabic ? 'تنبيهات النظام' : 'System alerts',
+    description: isArabic ? 'تنبيهات مباشرة من المخزون والفواتير والعمليات المهمة.' : 'Live alerts from inventory, invoices, and important operations.',
+    product: isArabic ? 'المنتج / الجهة' : 'Product / party',
+    sku: isArabic ? 'رمز / رقم المستند' : 'SKU / reference',
+    stock: isArabic ? 'الرصيد الحالي' : 'Current balance',
+    threshold: isArabic ? 'حد التنبيه' : 'Alert threshold',
+    type: isArabic ? 'النوع' : 'Type',
+    date: isArabic ? 'تاريخ الإنشاء' : 'Created at',
+    status: isArabic ? 'الحالة' : 'Status',
+    actions: isArabic ? 'الإجراءات' : 'Actions',
+    unread: isArabic ? 'تنبيهات غير مقروءة' : 'Unread alerts',
+    total: isArabic ? 'إجمالي التنبيهات' : 'Total alerts',
+    showResolved: isArabic ? 'إظهار التنبيهات المخفية' : 'Show dismissed alerts',
+    refresh: isArabic ? 'تحديث' : 'Refresh',
+    noAlerts: isArabic ? 'لا توجد تنبيهات حالية' : 'No current alerts',
+    loading: isArabic ? 'جاري تحميل التنبيهات...' : 'Loading alerts...',
+    error: isArabic ? 'تعذر تحميل تنبيهات النظام.' : 'Could not load system alerts.',
+    markRead: isArabic ? 'مقروء' : 'Mark read',
+    dismiss: isArabic ? 'إخفاء' : 'Dismiss',
+    read: isArabic ? 'مقروء' : 'Read',
+    unreadStatus: isArabic ? 'غير مقروء' : 'Unread',
+    dismissed: isArabic ? 'مخفي' : 'Dismissed',
+    low: isArabic ? 'مخزون منخفض' : 'Low stock',
+    out: isArabic ? 'نفاد المخزون' : 'Out of stock',
+    due: isArabic ? 'فاتورة مورد متأخرة' : 'Overdue supplier invoice',
+    unit: isArabic ? 'وحدة' : 'units',
+    currency: isArabic ? 'جنيه' : 'EGP',
   };
 
-  const getStatusBadge = (isRead: boolean, isResolved: boolean) => {
-    if (isResolved) {
-      return <Badge variant="outline" className="gap-1"><CheckCircle size={12} />{t.resolved}</Badge>;
-    }
-    if (isRead) {
-      return <Badge variant="secondary" className="gap-1"><Bell size={12} />{t.read}</Badge>;
-    }
-    return <Badge variant="destructive" className="gap-1"><BellOff size={12} />{t.unread}</Badge>;
+  const categoryLabel = (category: string) => {
+    if (category === 'low_stock') return text.low;
+    if (category === 'out_of_stock') return text.out;
+    if (category === 'overdue_payable') return text.due;
+    return category;
   };
 
-  const unreadCount = alerts.filter(a => !a.is_read && !a.is_resolved).length;
-  const totalCount = alerts.length;
+  const setRead = (id: string) => setStatuses((current) => ({ ...current, [id]: { ...current[id], read: true } }));
+  const dismiss = (id: string) => setStatuses((current) => ({ ...current, [id]: { ...current[id], read: true, resolved: true } }));
 
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between flex-wrap gap-4">
+    <div className="space-y-6" dir={isArabic ? 'rtl' : 'ltr'}>
+      <div className="flex flex-wrap items-center justify-between gap-4">
         <div className="flex items-center gap-3">
-          <div className="p-2 rounded-lg bg-amber-500/10">
-            <AlertTriangle className="text-amber-500" size={24} />
-          </div>
+          <div className="rounded-lg bg-amber-500/10 p-2"><AlertTriangle className="text-amber-600" size={24} /></div>
           <div>
-            <h2 className="text-xl font-bold text-foreground">{t.title}</h2>
-            <p className="text-sm text-muted-foreground">{t.description}</p>
+            <h2 className="text-xl font-bold">{text.title}</h2>
+            <p className="text-sm text-muted-foreground">{text.description}</p>
           </div>
         </div>
-        <Button variant="outline" size="sm" onClick={() => refetch()}>
-          <RefreshCw size={16} className="me-2" />
-          {t.refresh}
+        <Button variant="outline" size="sm" onClick={() => refetch()} disabled={isFetching}>
+          <RefreshCw size={16} className={`me-2 ${isFetching ? 'animate-spin' : ''}`} />{text.refresh}
         </Button>
       </div>
 
-      {/* Stats */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        <Card className="card-elevated">
-          <CardContent className="p-4">
-            <div className="flex items-center gap-3">
-              <div className="p-2 rounded-lg bg-red-500/10">
-                <BellOff className="text-red-500" size={20} />
-              </div>
-              <div>
-                <p className="text-sm text-muted-foreground">{t.unreadAlerts}</p>
-                <p className="text-2xl font-bold">{unreadCount}</p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="card-elevated">
-          <CardContent className="p-4">
-            <div className="flex items-center gap-3">
-              <div className="p-2 rounded-lg bg-amber-500/10">
-                <Bell className="text-amber-500" size={20} />
-              </div>
-              <div>
-                <p className="text-sm text-muted-foreground">{t.totalAlerts}</p>
-                <p className="text-2xl font-bold">{totalCount}</p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
+      <div className="grid gap-4 sm:grid-cols-2">
+        <Card><CardContent className="flex items-center gap-3 p-4">
+          <div className="rounded-lg bg-red-500/10 p-2"><BellOff className="text-red-500" size={20} /></div>
+          <div><p className="text-sm text-muted-foreground">{text.unread}</p><p className="text-2xl font-bold">{unreadCount}</p></div>
+        </CardContent></Card>
+        <Card><CardContent className="flex items-center gap-3 p-4">
+          <div className="rounded-lg bg-amber-500/10 p-2"><Bell className="text-amber-600" size={20} /></div>
+          <div><p className="text-sm text-muted-foreground">{text.total}</p><p className="text-2xl font-bold">{totalCount}</p></div>
+        </CardContent></Card>
       </div>
 
-      {/* Filter */}
-      <div className="flex items-center gap-2">
-        <Checkbox
-          id="showResolved"
-          checked={showResolved}
-          onCheckedChange={(checked) => setShowResolved(checked as boolean)}
-        />
-        <label htmlFor="showResolved" className="text-sm cursor-pointer">
-          {t.showResolved}
-        </label>
-      </div>
+      <label className="flex cursor-pointer items-center gap-2 text-sm">
+        <Checkbox checked={showResolved} onCheckedChange={(checked) => setShowResolved(checked === true)} />{text.showResolved}
+      </label>
 
-      {/* Alerts Table */}
-      <Card className="card-elevated">
+      <Card>
         <CardHeader className="border-b">
-          <CardTitle className="flex items-center gap-2">
-            <AlertTriangle size={18} />
-            {t.title}
-          </CardTitle>
+          <CardTitle className="flex items-center gap-2"><AlertTriangle size={18} />{text.title}</CardTitle>
         </CardHeader>
         <CardContent className="p-0">
-          <ScrollArea className="h-[400px] w-full">
-            <div className="min-w-[900px]">
+          {isError && <div className="p-4 text-sm text-destructive">{(error as Error)?.message || text.error}</div>}
+          <ScrollArea className="h-[min(60vh,620px)] w-full">
+            <div className="min-w-[1050px]">
               <Table>
-                <TableHeader className="sticky top-0 bg-background z-10">
+                <TableHeader className="sticky top-0 z-10 bg-background">
                   <TableRow>
-                    <TableHead className="min-w-[200px]">{t.product}</TableHead>
-                    <TableHead className="min-w-[100px]">{t.sku}</TableHead>
-                    <TableHead className="min-w-[100px]">{t.currentStock}</TableHead>
-                    <TableHead className="min-w-[80px]">{t.threshold}</TableHead>
-                    <TableHead className="min-w-[120px]">{t.type}</TableHead>
-                    <TableHead className="min-w-[150px]">{t.createdAt}</TableHead>
-                    <TableHead className="min-w-[100px]">{t.status}</TableHead>
-                    <TableHead className="min-w-[150px]">{t.actions}</TableHead>
+                    <TableHead>{text.product}</TableHead><TableHead>{text.sku}</TableHead>
+                    <TableHead>{text.stock}</TableHead><TableHead>{text.threshold}</TableHead>
+                    <TableHead>{text.type}</TableHead><TableHead>{text.date}</TableHead>
+                    <TableHead>{text.status}</TableHead><TableHead>{text.actions}</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {alerts.length === 0 ? (
-                    <TableRow>
-                      <TableCell colSpan={8} className="text-center py-8 text-muted-foreground">
-                        {t.noAlerts}
-                      </TableCell>
-                    </TableRow>
-                  ) : (
-                    alerts.map(alert => (
-                      <TableRow key={alert.id} className={!alert.is_read ? 'bg-amber-500/5' : ''}>
-                        <TableCell className="font-medium">
-                          {language === 'ar' 
-                            ? alert.products?.name_ar || alert.products?.name || '-'
-                            : alert.products?.name || '-'
-                          }
+                  {isLoading ? (
+                    <TableRow><TableCell colSpan={8} className="py-10 text-center text-muted-foreground">{text.loading}</TableCell></TableRow>
+                  ) : visibleAlerts.length === 0 ? (
+                    <TableRow><TableCell colSpan={8} className="py-10 text-center text-muted-foreground"><CheckCircle className="mx-auto mb-2 h-8 w-8 opacity-50" />{text.noAlerts}</TableCell></TableRow>
+                  ) : visibleAlerts.map((alert) => {
+                    const status = statuses[alert.id];
+                    const isResolved = Boolean(status?.resolved);
+                    const isRead = Boolean(status?.read);
+                    const quantity = Number(alert.current_quantity || 0);
+                    const isPayable = alert.category === 'overdue_payable';
+                    return (
+                      <TableRow key={alert.id} className={!isRead && !isResolved ? 'bg-amber-500/5' : ''}>
+                        <TableCell className="max-w-[260px] font-medium">
+                          <div className="truncate">{isArabic ? alert.product_name : alert.product_name}</div>
+                          {alert.warehouse_name && <div className="text-xs text-muted-foreground">{alert.warehouse_name}</div>}
+                          {alert.barcode && <div className="font-mono text-xs text-muted-foreground">{alert.barcode}</div>}
                         </TableCell>
-                        <TableCell className="text-muted-foreground">
-                          {alert.products?.sku || '-'}
-                        </TableCell>
-                        <TableCell className="font-semibold">{alert.current_quantity}</TableCell>
-                        <TableCell>{alert.threshold_quantity}</TableCell>
-                        <TableCell>{getAlertTypeBadge(alert.alert_type)}</TableCell>
-                        <TableCell className="text-muted-foreground">
-                          {formatDate(alert.created_at)}
-                        </TableCell>
-                        <TableCell>{getStatusBadge(alert.is_read, alert.is_resolved)}</TableCell>
-                        <TableCell>
-                          <div className="flex items-center gap-2">
-                            {!alert.is_read && (
-                              <Button 
-                                variant="ghost" 
-                                size="sm"
-                                onClick={() => markReadMutation.mutate(alert.id)}
-                              >
-                                {t.markRead}
-                              </Button>
-                            )}
-                            {!alert.is_resolved && (
-                              <Button 
-                                variant="ghost" 
-                                size="sm"
-                                onClick={() => markResolvedMutation.mutate(alert.id)}
-                              >
-                                {t.markResolved}
-                              </Button>
-                            )}
-                          </div>
-                        </TableCell>
+                        <TableCell className="font-mono text-muted-foreground">{alert.sku || '-'}</TableCell>
+                        <TableCell className="font-semibold">{quantity.toLocaleString(isArabic ? 'ar-EG' : 'en-US', { maximumFractionDigits: 2 })} {isPayable ? text.currency : text.unit}</TableCell>
+                        <TableCell>{isPayable ? '-' : Number(alert.threshold_quantity || 0)}</TableCell>
+                        <TableCell><Badge variant={alert.type === 'error' ? 'destructive' : 'secondary'} className="gap-1">{alert.category === 'out_of_stock' ? <XCircle size={12} /> : <Package size={12} />}{categoryLabel(alert.category)}</Badge></TableCell>
+                        <TableCell className="text-muted-foreground">{formatDate(alert.created_at)}</TableCell>
+                        <TableCell><Badge variant={isResolved ? 'outline' : isRead ? 'secondary' : 'destructive'}>{isResolved ? text.dismissed : isRead ? text.read : text.unreadStatus}</Badge></TableCell>
+                        <TableCell><div className="flex items-center gap-1">
+                          {!isRead && !isResolved && <Button variant="ghost" size="sm" onClick={() => setRead(alert.id)}>{text.markRead}</Button>}
+                          {!isResolved && <Button variant="ghost" size="sm" onClick={() => dismiss(alert.id)}>{text.dismiss}</Button>}
+                        </div></TableCell>
                       </TableRow>
-                    ))
-                  )}
+                    );
+                  })}
                 </TableBody>
               </Table>
             </div>

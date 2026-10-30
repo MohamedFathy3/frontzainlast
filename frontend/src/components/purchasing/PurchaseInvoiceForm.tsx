@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useAuth } from '@/contexts/AuthContext';
+import { useApp } from '@/contexts/AppContext';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -59,6 +60,7 @@ const PurchaseInvoiceForm: React.FC<PurchaseInvoiceFormProps> = ({
 }) => {
   const { language } = useLanguage();
   const { user } = useAuth();
+  const { currentBranch, userBranch } = useApp();
   const queryClient = useQueryClient();
   const [loading, setLoading] = useState(false);
   const [variantProduct, setVariantProduct] = useState<any>(null);
@@ -95,6 +97,13 @@ const PurchaseInvoiceForm: React.FC<PurchaseInvoiceFormProps> = ({
   });
 
   const [items, setItems] = useState<InvoiceItem[]>([]);
+
+  useEffect(() => {
+    const branchId = userBranch?.id || currentBranch?.id;
+    if (isOpen && !isEditMode && !formData.branch_id && branchId) {
+      setFormData((current) => ({ ...current, branch_id: String(branchId) }));
+    }
+  }, [isOpen, isEditMode, formData.branch_id, currentBranch?.id, userBranch?.id]);
 
   // ========== Fetch Data ==========
   const { data: suppliers = [], isLoading: loadingSuppliers } = useSuppliers(isOpen);

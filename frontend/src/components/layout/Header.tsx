@@ -573,6 +573,8 @@ const Header: React.FC = () => {
               <DropdownMenuItem 
                 onClick={() => {
                   setCurrentBranch(null);
+                  setCurrentWarehouse(null);
+                  queryClient.invalidateQueries();
                   refetchWarehouses();
                 }}
                 className="flex items-center justify-between cursor-pointer"
@@ -589,7 +591,11 @@ const Header: React.FC = () => {
                 branches.map((branch: Branch) => (
                   <DropdownMenuItem 
                     key={branch.id}
-                    onClick={() => setCurrentBranch(branch)}
+                    onClick={() => {
+                      setCurrentBranch(branch as any);
+                      setCurrentWarehouse(null);
+                      queryClient.invalidateQueries();
+                    }}
                     className="flex items-center justify-between cursor-pointer"
                   >
                     <div className="flex flex-col">

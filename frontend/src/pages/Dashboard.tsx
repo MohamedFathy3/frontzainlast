@@ -9,17 +9,21 @@ import SalesTrendChart from '@/components/dashboard/SalesTrendChart';
 import CategoryPerformanceChart from '@/components/dashboard/CategoryPerformanceChart';
 import BranchRevenueChart from '@/components/dashboard/BranchRevenueChart';
 import RecentTransactions from '@/components/dashboard/RecentTransactions';
-import LowStockAlert from '@/components/dashboard/LowStockAlert';
 import { useDashboardData } from '@/hooks/useDashboardData';
 
 const Dashboard: React.FC = () => {
   const { language } = useLanguage();
   const { 
-    revenueReport,
     dashboardMetrics,
     recentTransactions,
-    lowStockProducts,
-    isLoading 
+    salesTrend,
+    topCategories,
+    branchRevenues,
+    currencyCode,
+    isLoading,
+    isError,
+    error,
+    refetch,
   } = useDashboardData();
 
   const getGreeting = () => {
@@ -31,7 +35,7 @@ const Dashboard: React.FC = () => {
 
   return (
     <MainLayout>
-      <div className="space-y-6 animate-fade-in">
+      <div className="space-y-5 animate-fade-in">
         {/* Welcome Header */}
         <DashboardHeader greeting={getGreeting()} />
 
@@ -39,37 +43,30 @@ const Dashboard: React.FC = () => {
         <QuickAccessGrid />
 
         {/* KPI Cards */}
-        <DashboardKPIs metrics={dashboardMetrics} isLoading={isLoading} />
+        <DashboardKPIs metrics={dashboardMetrics} isLoading={isLoading} currencyCode={currencyCode} isError={isError} />
 
-        {/* Low Stock Alert */}
-
+        {isError && (
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-destructive/20 bg-destructive/5 px-4 py-3 text-sm text-destructive">
+            <span>{language === 'ar' ? 'تعذر تحميل بيانات لوحة المعلومات من الخادم.' : 'Dashboard data could not be loaded from the server.'} {error instanceof Error ? error.message : ''}</span>
+            <button type="button" onClick={() => refetch()} className="font-medium underline underline-offset-4">
+              {language === 'ar' ? 'إعادة المحاولة' : 'Retry'}
+            </button>
+          </div>
+        )}
         {/* Charts Row */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
           <div className="lg:col-span-2">
-            <SalesTrendChart 
-              branchId={undefined}
-              reportData={revenueReport}
-            />
+            <SalesTrendChart data={salesTrend} isLoading={isLoading} currencyCode={currencyCode} />
           </div>
           <div>
-            <CategoryPerformanceChart 
-              categories={revenueReport?.top_categories || []}
-            />
+            <CategoryPerformanceChart categories={topCategories} isLoading={isLoading} currencyCode={currencyCode} />
           </div>
         </div>
 
         {/* Second Row */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          <div>
-            <BranchRevenueChart 
-              branches={revenueReport?.branch_revenues || []}
-            />
-          </div>
-          <div>
-            <RecentTransactions 
-              transactions={recentTransactions}
-            />
-          </div>
+          <BranchRevenueChart branches={branchRevenues} isLoading={isLoading} currencyCode={currencyCode} />
+          <RecentTransactions transactions={recentTransactions} isLoading={isLoading} currencyCode={currencyCode} />
         </div>
       </div>
     </MainLayout>

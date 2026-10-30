@@ -237,7 +237,7 @@ export default function WarehouseStockReport() {
         </Card>
       )}
 
-      <Card>
+      <Card className="w-full min-w-0">
         <CardContent className="p-0">
           <div className="flex flex-wrap items-center justify-between gap-2 p-4">
             <div>
@@ -246,7 +246,8 @@ export default function WarehouseStockReport() {
             </div>
             <span className="text-sm text-muted-foreground">{number(data?.balance_meta.total || 0)} {isArabic ? 'رصيد' : 'balances'}</span>
           </div>
-          <Table>
+          <div className="w-full overflow-x-auto">
+          <Table className="min-w-[900px] table-fixed">
             <TableHeader>
               <TableRow>
                 <TableHead>{isArabic ? 'المخزن' : 'Warehouse'}</TableHead>
@@ -278,6 +279,7 @@ export default function WarehouseStockReport() {
               ))}
             </TableBody>
           </Table>
+          </div>
           <div className="flex items-center justify-end gap-2 p-4">
             <Button size="sm" variant="outline" disabled={!data || page <= 1} onClick={() => setPage((current) => current - 1)}>
               {isArabic ? 'السابق' : 'Previous'}
@@ -314,7 +316,8 @@ export default function WarehouseStockReport() {
               <p className="p-8 text-center text-sm text-muted-foreground">{isArabic ? 'لا توجد حركات مسجلة لهذا المنتج.' : 'No recorded movements for this product.'}</p>
             ) : (
               <>
-                <Table>
+                <div className="w-full overflow-x-auto">
+                <Table className="min-w-[1100px] table-fixed">
                   <TableHeader>
                     <TableRow>
                       <TableHead>{isArabic ? 'التاريخ' : 'Date'}</TableHead>
@@ -348,6 +351,7 @@ export default function WarehouseStockReport() {
                     ))}
                   </TableBody>
                 </Table>
+                </div>
                 <div className="flex items-center justify-end gap-2 p-4">
                   <Button size="sm" variant="outline" disabled={movementPage <= 1} onClick={() => setMovementPage((current) => current - 1)}>
                     {isArabic ? 'السابق' : 'Previous'}

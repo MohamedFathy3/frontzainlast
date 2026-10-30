@@ -2,6 +2,7 @@
 import { useState, useEffect, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useLanguage } from "@/contexts/LanguageContext";
+import { useApp } from "@/contexts/AppContext";
 import { useCurrencyTax } from "@/hooks/useCurrencyTax";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -147,6 +148,7 @@ interface SalesInvoiceFormProps {
 
 const SalesInvoiceForm = ({ isOpen, onClose, editInvoice }: SalesInvoiceFormProps) => {
   const { language } = useLanguage();
+  const { currentBranch, userBranch } = useApp();
   const queryClient = useQueryClient();
   const { formatAmount } = useCurrencyTax();
   const [searchQuery, setSearchQuery] = useState("");
@@ -178,6 +180,13 @@ const SalesInvoiceForm = ({ isOpen, onClose, editInvoice }: SalesInvoiceFormProp
     notes: ""
   });
   const [invoiceNumber, setInvoiceNumber] = useState<string>("");
+
+  useEffect(() => {
+    const branchId = userBranch?.id || currentBranch?.id;
+    if (isOpen && !editInvoice && !formData.branch_id && branchId) {
+      setFormData((current) => ({ ...current, branch_id: String(branchId) }));
+    }
+  }, [isOpen, editInvoice, formData.branch_id, currentBranch?.id, userBranch?.id]);
 
   // Dialog لاختيار المقاس واللون
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);

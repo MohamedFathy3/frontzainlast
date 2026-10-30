@@ -280,14 +280,11 @@ const WarehouseTransfer = () => {
         to_warehouse_id: parseInt(toWarehouse),
         products: transferItems.map(item => ({
           product_id: item.product_id,
-          product_unit_id: item.product_unit_id,
-          color_id: item.color_id,
-          quantity: item.quantity,
-          ...(item.product_unit_id !== 0 && { product_unit_id: item.product_unit_id }),
-          ...(item.color_id !== 0 && { color_id: item.color_id }),
+          ...(item.product_unit_id > 0 && { product_unit_id: item.product_unit_id }),
+          ...(item.color_id > 0 && { color_id: item.color_id }),
           quantity: item.quantity,
           ...(productNotes[`${item.product_id}-${item.product_unit_id}-${item.color_id}`]
-            ? { note: productNotes[`...`] }
+            ? { note: productNotes[`${item.product_id}-${item.product_unit_id}-${item.color_id}`] }
             : {})
 
         }))
@@ -524,7 +521,7 @@ const WarehouseTransfer = () => {
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="flex gap-4">
+          <div className="flex flex-col gap-3 lg:flex-row">
             <div className="flex-1">
               <Select value={warehouseFilter} onValueChange={(value) => {
                 setWarehouseFilter(value);
@@ -566,7 +563,8 @@ const WarehouseTransfer = () => {
       {/* ===== جدول المنتجات ===== */}
       <Card>
         <CardContent className="p-0">
-          <ScrollArea className="h-[400px]">
+          <ScrollArea className="h-[400px] w-full">
+            <div className="min-w-[900px]">
             <Table>
               <TableHeader className="sticky top-0 bg-background">
                 <TableRow>
@@ -610,6 +608,7 @@ const WarehouseTransfer = () => {
                 )}
               </TableBody>
             </Table>
+            </div>
             <ScrollBar orientation="horizontal" />
           </ScrollArea>
         </CardContent>
@@ -617,7 +616,7 @@ const WarehouseTransfer = () => {
 
       {/* ===== مودال التحويل ===== */}
       <Dialog open={showTransferModal} onOpenChange={setShowTransferModal}>
-        <DialogContent className="max-w-5xl max-h-[85vh] overflow-y-auto">
+        <DialogContent className="w-[96vw] max-w-[1500px] max-h-[92vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <ArrowLeftRight className="h-5 w-5 text-primary" />

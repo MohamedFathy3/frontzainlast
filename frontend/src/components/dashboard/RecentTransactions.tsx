@@ -5,15 +5,15 @@ import { Badge } from '@/components/ui/badge';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useNavigate } from 'react-router-dom';
-import { useRegionalSettings } from '@/contexts/RegionalSettingsContext';
+import { formatDashboardAmount } from '@/components/dashboard/formatDashboardAmount';
 
 // واجهة موحدة للمعاملات (مبيعات ومشتريات)
 interface Transaction {
-  id: number;
+  id: string;
   invoice_number: string;
   party_name: string; // اسم العميل أو المورد
   branch_name: string;
-  payment_method: string;
+  payment_method: string | null;
   total_amount: number;
   created_at: string;
   type: 'sale' | 'purchase';
@@ -22,14 +22,15 @@ interface Transaction {
 interface RecentTransactionsProps {
   transactions?: Transaction[];
   isLoading?: boolean;
+  currencyCode: string;
 }
 
 const RecentTransactions: React.FC<RecentTransactionsProps> = ({ 
   transactions = [], 
-  isLoading = false 
+  isLoading = false,
+  currencyCode,
 }) => {
   const { language } = useLanguage();
-  const { formatCurrency } = useRegionalSettings();
   const navigate = useNavigate();
 
   // دالة الترجمة المحلية
@@ -61,6 +62,9 @@ const RecentTransactions: React.FC<RecentTransactionsProps> = ({
   };
 
   const getPaymentBadge = (method: string | null) => {
+    if (!method) {
+      return <Badge variant="outline">{language === 'ar' ? 'غير محدد' : 'Not specified'}</Badge>;
+    }
     const methodLower = method?.toLowerCase() || 'cash';
     switch (methodLower) {
       case 'cash':
@@ -179,7 +183,7 @@ const RecentTransactions: React.FC<RecentTransactionsProps> = ({
               </div>
               <div className="text-right">
                 <p className="text-sm font-bold text-foreground">
-                  {formatCurrency(tx.total_amount)}
+                  {formatDashboardAmount(tx.total_amount, currencyCode, language)}
                 </p>
               </div>
             </div>

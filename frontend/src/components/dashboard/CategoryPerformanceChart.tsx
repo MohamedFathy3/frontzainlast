@@ -1,71 +1,50 @@
-// components/dashboard/CategoryPerformanceChart.tsx
 import React from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { PieChart, Pie, Cell, ResponsiveContainer, Legend, Tooltip } from 'recharts';
+import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { useLanguage } from '@/contexts/LanguageContext';
-
-interface Category {
-  category_id: number;
-  category_name: string;
-  total_quantity: number;
-}
+import { Skeleton } from '@/components/ui/skeleton';
+import { CategoryPerformance } from '@/hooks/useDashboardData';
+import { formatDashboardAmount } from '@/components/dashboard/formatDashboardAmount';
 
 interface CategoryPerformanceChartProps {
-  categories?: Category[];
+  categories?: CategoryPerformance[];
+  isLoading?: boolean;
+  currencyCode: string;
 }
 
-const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec489a'];
-
-const CategoryPerformanceChart: React.FC<CategoryPerformanceChartProps> = ({ categories = [] }) => {
+const CategoryPerformanceChart: React.FC<CategoryPerformanceChartProps> = ({ categories = [], isLoading = false, currencyCode }) => {
   const { language, t } = useLanguage();
-
-  // تأكد من وجود بيانات صالحة
-  const validCategories = categories.filter(cat => cat && cat.category_name && cat.total_quantity > 0);
-
-  if (validCategories.length === 0) {
-    return (
-      <Card>
-        <CardHeader>
-          <CardTitle>{t('dashboard.categoryPerformance')}</CardTitle>
-        </CardHeader>
-        <CardContent className="h-[300px] flex items-center justify-center">
-          <p className="text-muted-foreground">{t('common.noData')}</p>
-        </CardContent>
-      </Card>
-    );
-  }
-
-  const data = validCategories.map(cat => ({
-    name: language === 'ar' ? cat.category_name : cat.category_name,
-    value: cat.total_quantity
-  }));
+  const data = categories
+    .filter((item) => item && item.category_name)
+    .map((item) => ({
+      name: item.category_name,
+      revenue: Number(item.total_revenue) || 0,
+      quantity: Number(item.total_quantity) || 0,
+    }))
+    .filter((item) => item.revenue > 0 || item.quantity > 0);
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>{t('dashboard.categoryPerformance')}</CardTitle>
+    <Card className="h-full">
+      <CardHeader className="pb-2">
+        <CardTitle className="text-base">{t('dashboard.categoryPerformance')}</CardTitle>
+        <p className="text-xs text-muted-foreground">{language === 'ar' ? 'مبيعات الشهر حسب التصنيف' : 'Current-month sales by category'}</p>
       </CardHeader>
-      <CardContent>
-        <ResponsiveContainer width="100%" height={300}>
-          <PieChart>
-            <Pie
-              data={data}
-              cx="50%"
-              cy="50%"
-              labelLine={false}
-              label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`}
-              outerRadius={80}
-              fill="#8884d8"
-              dataKey="value"
-            >
-              {data.map((entry, index) => (
-                <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-              ))}
-            </Pie>
-            <Tooltip />
-            <Legend />
-          </PieChart>
-        </ResponsiveContainer>
+      <CardContent className="h-[300px] pt-2">
+        {isLoading ? <Skeleton className="h-full w-full" /> : data.length ? (
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart data={data} layout="vertical" margin={{ top: 4, right: 16, left: 4, bottom: 4 }}>
+              <CartesianGrid strokeDasharray="3 3" horizontal={false} />
+              <XAxis type="number" tickFormatter={(value) => formatDashboardAmount(Number(value), currencyCode, language)} tick={{ fontSize: 11 }} />
+              <YAxis type="category" dataKey="name" width={90} tick={{ fontSize: 11 }} />
+              <Tooltip formatter={(value: number) => [formatDashboardAmount(Number(value), currencyCode, language), language === 'ar' ? 'قيمة المبيعات' : 'Sales']} />
+              <Bar dataKey="revenue" fill="hsl(var(--primary))" radius={[0, 5, 5, 0]} barSize={22} />
+            </BarChart>
+          </ResponsiveContainer>
+        ) : (
+          <div className="flex h-full flex-col items-center justify-center gap-2 text-center text-sm text-muted-foreground">
+            <span>{language === 'ar' ? 'لا توجد مبيعات مصنفة هذا الشهر' : 'No categorized sales this month'}</span>
+          </div>
+        )}
       </CardContent>
     </Card>
   );

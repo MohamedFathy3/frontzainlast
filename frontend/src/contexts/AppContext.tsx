@@ -149,7 +149,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const { user } = useAuth();
   
   // Branch state
-  const [currentBranch, setCurrentBranch] = useState<Branch | null>(null);
+  const [currentBranch, setCurrentBranchState] = useState<Branch | null>(() => {
+    try { return JSON.parse(localStorage.getItem('selected-branch') || 'null') as Branch | null; }
+    catch { return null; }
+  });
+  const setCurrentBranch = useCallback((branch: Branch | null) => {
+    setCurrentBranchState(branch);
+    if (branch) localStorage.setItem('selected-branch', JSON.stringify(branch));
+    else localStorage.removeItem('selected-branch');
+  }, []);
   const [branches, setBranches] = useState<Branch[]>([]);
   const [loadingBranches, setLoadingBranches] = useState(true);
   

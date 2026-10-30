@@ -57,6 +57,32 @@ api.interceptors.request.use(async (config) => {
   const token = Cookies.get("token");
   const method = config.method?.toUpperCase();
 
+  // Apply the globally selected branch only to known list/report endpoints whose
+  // backend controllers support branch_id filtering. Master data remains shared.
+  const branchScopedPaths = [
+    '/sales-invoices/index', '/purchases-invoices/index', '/finance/index',
+    '/revenue/index', '/employee/index', '/treasury/index', '/bank/index',
+    '/invoice/index', '/warehouse/index', '/sales-representative/index',
+    '/attendance/index', '/warehouses/index-product', '/inventory/index',
+  ];
+  const path = (config.url || '').split('?')[0].replace(/\/$/, '');
+  const selectedBranch = (() => {
+    try { return JSON.parse(localStorage.getItem('selected-branch') || 'null'); }
+    catch { return null; }
+  })();
+  if (selectedBranch?.id && branchScopedPaths.some((candidate) => path.endsWith(candidate))) {
+    const branchId = Number(selectedBranch.id);
+    if (Number.isFinite(branchId) && method === 'POST') {
+      const payload = config.data && typeof config.data === 'object'
+        ? config.data as Record<string, any>
+        : {};
+      config.data = { ...payload, filters: { ...(payload.filters || {}), branch_id: branchId } };
+    }
+  }
+  if (selectedBranch?.id && (path.endsWith('/inventory/warehouse-report') || path.endsWith('/system/alerts'))) {
+    config.params = { ...(config.params || {}), branch_id: Number(selectedBranch.id) };
+  }
+
   console.log("🔍 API Request Details:", {
     url: config.url,
     method: method,

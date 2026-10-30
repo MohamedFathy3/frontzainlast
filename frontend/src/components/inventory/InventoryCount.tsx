@@ -73,7 +73,8 @@ const flattenProductColors = (product: WarehouseProduct): CountedProduct[] => {
       unit_name: null,
       color: null,
       color_hex: null,
-      sku: product.sku
+      sku: product.sku,
+      barcode: (product as any).barcode
     }];
   }
   
@@ -91,7 +92,8 @@ const flattenProductColors = (product: WarehouseProduct): CountedProduct[] => {
           unit_name: unit.unit_name,
           color: color.color,
           color_hex: color.hex_code,
-          sku: product.sku
+          sku: product.sku,
+      barcode: (product as any).barcode
         });
       });
     } else {
@@ -106,7 +108,8 @@ const flattenProductColors = (product: WarehouseProduct): CountedProduct[] => {
         unit_name: unit.unit_name,
         color: null,
         color_hex: null,
-        sku: product.sku
+        sku: product.sku,
+      barcode: (product as any).barcode
       });
     }
   });
@@ -507,6 +510,7 @@ const InventoryCount = () => {
     return flattened.filter((row: CountedProduct) =>
       row.product_name?.toLowerCase().includes(query) ||
       row.sku?.toLowerCase().includes(query) ||
+      (row as any).barcode?.toLowerCase().includes(query) ||
       row.unit_name?.toLowerCase().includes(query) ||
       row.color?.toLowerCase().includes(query)
     );
@@ -988,7 +992,7 @@ const InventoryCount = () => {
 
       {/* New Count Dialog */}
       <Dialog open={newCountOpen} onOpenChange={setNewCountOpen}>
-        <DialogContent className="max-w-4xl max-h-[90vh] overflow-hidden flex flex-col p-0">
+        <DialogContent className="w-[96vw] max-w-[1500px] max-h-[94vh] overflow-hidden flex flex-col p-0">
           <DialogHeader className="p-4 border-b">
             <DialogTitle className="flex items-center gap-2">
               <Plus size={18} />
@@ -1098,7 +1102,7 @@ const InventoryCount = () => {
                 </div>
                 
                 {/* قائمة المنتجات */}
-                <ScrollArea className="h-[350px] border rounded-lg">
+                <ScrollArea className="h-[min(52vh,560px)] border rounded-lg">
                   {flattenedProducts.length === 0 ? (
                     <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
                       <Package className="h-12 w-12 mb-2 opacity-20" />
@@ -1125,6 +1129,7 @@ const InventoryCount = () => {
                               </p>
                               <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground mt-1">
                                 <span className="font-mono">{item.sku}</span>
+                                {(item as any).barcode && <span className="font-mono">{language === 'ar' ? 'باركود' : 'Barcode'}: {(item as any).barcode}</span>}
                                 {item.unit_name && (
                                   <>
                                     <span>•</span>
