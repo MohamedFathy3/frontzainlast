@@ -21,6 +21,7 @@ import CRM from "./pages/CRM";
 import Reports from "./pages/Reports";
 import Settings from "./pages/Settings";
 import NotFound from "./pages/NotFound";
+import Manufacturing from "./pages/Manufacturing";
 
 const queryClient = new QueryClient();
 
@@ -46,6 +47,7 @@ const App = () => (
                 <Route path="/crm" element={<ProtectedRoute><CRM /></ProtectedRoute>} />
                 <Route path="/reports" element={<ProtectedRoute><Reports /></ProtectedRoute>} />
                 <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
+                <Route path="/manufacturing" element={<ProtectedRoute><Manufacturing /></ProtectedRoute>} />
                 <Route path="/POSRetrun" element={<ProtectedRoute><POSRetrun /></ProtectedRoute>} />
                 {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
                 <Route path="*" element={<NotFound />} />
