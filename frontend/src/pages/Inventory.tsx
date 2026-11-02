@@ -208,7 +208,12 @@ const Inventory: React.FC = () => {
 
   // ========== جلب المنتجات مع فلترة حسب الفئة ==========
   const { data: dbProducts = [], refetch, isLoading: productsLoading } = useQuery({
-    queryKey: ['inventory-products', selectedCategory, categoryFilter, statusFilter],
+    queryKey: [
+      'inventory-products',
+      selectedCategory,
+      categoryFilter,
+      statusFilter
+    ],
     queryFn: async () => {
       try {
         const payload: any = {
@@ -324,10 +329,47 @@ const Inventory: React.FC = () => {
   const dbCategories = categories;
 
   // تحويل المنتجات من API إلى شكل Product
-  const products: Product[] = dbProducts.map((product: any) => {
-    const transformed = transformApiProduct(product);
-    return transformed;
-  });
+  const products: Product[] = useMemo(() => {
+    return dbProducts
+      .filter((product: any) => {
+        // كل المنتجات
+        if (warehouseFilter === 'all') return true;
+
+        // المنتجات المرتبطة بالمخزن المختار
+        return product.warehouses?.some(
+          (warehouse: any) =>
+            String(warehouse.warehouse_id) === String(warehouseFilter)
+        );
+      })
+      .map((product: any) => {
+        const productWarehouses = product.warehouses || [];
+
+        // جميع المخازن: حساب إجمالي الرصيد
+        if (warehouseFilter === 'all') {
+          const totalStock = productWarehouses.reduce(
+            (total: number, warehouse: any) =>
+              total + Number(warehouse.stock || 0),
+            0
+          );
+
+          return transformApiProduct({
+            ...product,
+            stock: totalStock
+          });
+        }
+
+        // المخزن المختار: عرض رصيد المنتج في هذا المخزن
+        const warehouse = productWarehouses.find(
+          (w: any) =>
+            String(w.warehouse_id) === String(warehouseFilter)
+        );
+
+        return transformApiProduct({
+          ...product,
+          stock: Number(warehouse?.stock || 0)
+        });
+      });
+  }, [dbProducts, warehouseFilter]);
 
   // ========== فلترة المنتجات في الواجهة ==========
   const filteredProducts = useMemo(() => {
@@ -390,8 +432,7 @@ const Inventory: React.FC = () => {
   // Reset to page 1 when filters change
   React.useEffect(() => {
     setCurrentPage(1);
-  }, [searchQuery, statusFilter, stockFilter, categoryFilter, sortBy, selectedCategory]);
-
+  }, [searchQuery, statusFilter, stockFilter, categoryFilter, warehouseFilter, sortBy, selectedCategory]);
   const handlePageChange = (page: number) => {
     setCurrentPage(page);
   };
@@ -399,14 +440,21 @@ const Inventory: React.FC = () => {
   const clearFilters = () => {
     setStatusFilter('all');
     setStockFilter('all');
+    setWarehouseFilter('all');
     setCategoryFilter('all');
     setSelectedCategory(null);
     setSearchQuery('');
     setSortBy('created_desc');
   };
 
-  const hasActiveFilters = statusFilter !== 'all' || stockFilter !== 'all' || categoryFilter !== 'all' || selectedCategory !== null || searchQuery !== '' || sortBy !== 'created_desc';
-
+  const hasActiveFilters =
+    statusFilter !== 'all' ||
+    stockFilter !== 'all' ||
+    warehouseFilter !== 'all' ||
+    categoryFilter !== 'all' ||
+    selectedCategory !== null ||
+    searchQuery !== '' ||
+    sortBy !== 'created_desc';
   const handleAddProduct = () => {
     setEditProduct(null);
     setShowProductForm(true);
@@ -861,17 +909,29 @@ const Inventory: React.FC = () => {
 
                 {/* Warehouse Filter */}
                 <div className="mt-3">
-                  <Select value={warehouseFilter} onValueChange={setWarehouseFilter}>
+                  <Select
+                    value={warehouseFilter}
+                    onValueChange={setWarehouseFilter}
+                  >
                     <SelectTrigger className="h-9 w-full md:w-64">
-                      <SelectValue placeholder={language === 'ar' ? 'المستودع' : 'Warehouse'} />
+                      <SelectValue
+                        placeholder={language === 'ar' ? 'اختر المخزن' : 'Select Warehouse'}
+                      />
                     </SelectTrigger>
+
                     <SelectContent>
                       <SelectItem value="all">
-                        {language === 'ar' ? 'جميع المحازن ' : 'All Warehouses'}
+                        {language === 'ar' ? 'جميع المخازن' : 'All Warehouses'}
                       </SelectItem>
+
                       {warehouses.map((warehouse: any) => (
-                        <SelectItem key={warehouse.id} value={warehouse.id.toString()}>
-                          {language === 'ar' ? warehouse.name_ar || warehouse.name : warehouse.name}
+                        <SelectItem
+                          key={warehouse.id}
+                          value={String(warehouse.id)}
+                        >
+                          {language === 'ar'
+                            ? warehouse.name_ar || warehouse.name
+                            : warehouse.name}
                         </SelectItem>
                       ))}
                     </SelectContent>

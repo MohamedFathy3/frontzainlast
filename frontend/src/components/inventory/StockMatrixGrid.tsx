@@ -7,9 +7,11 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip';
-import { ScrollArea } from '@/components/ui/scroll-area';
+import {
+  ScrollArea,
+  ScrollBar,
+} from '@/components/ui/scroll-area'; interface VariantData {
 
-interface VariantData {
   id: string;
   sku: string;
   barcode: string | null;
@@ -112,7 +114,7 @@ const StockMatrixGrid: React.FC<StockMatrixGridProps> = ({
       <div className="space-y-2 text-sm min-w-48">
         <div className="flex items-center gap-2 pb-2 border-b border-border">
           {variant.color?.hex_code && (
-            <span 
+            <span
               className="w-4 h-4 rounded-full border border-border"
               style={{ backgroundColor: variant.color.hex_code }}
             />
@@ -123,18 +125,18 @@ const StockMatrixGrid: React.FC<StockMatrixGridProps> = ({
             {variant.size && (language === 'ar' ? variant.size.name_ar || variant.size.name : variant.size.name)}
           </span>
         </div>
-        
+
         <div className="grid grid-cols-2 gap-x-4 gap-y-1">
           <span className="text-muted-foreground">{language === 'ar' ? 'SKU:' : 'SKU:'}</span>
           <span className="font-mono text-xs">{variant.sku}</span>
-          
+
           {variant.barcode && (
             <>
               <span className="text-muted-foreground">{language === 'ar' ? 'الباركود:' : 'Barcode:'}</span>
               <span className="font-mono text-xs">{variant.barcode}</span>
             </>
           )}
-          
+
           <span className="text-muted-foreground">{language === 'ar' ? 'المخزون:' : 'Stock:'}</span>
           <span className={cn(
             "font-bold",
@@ -142,16 +144,16 @@ const StockMatrixGrid: React.FC<StockMatrixGridProps> = ({
           )}>
             {variant.stock}
           </span>
-          
+
           <span className="text-muted-foreground">{language === 'ar' ? 'السعر:' : 'Price:'}</span>
           <span className="text-primary font-medium">{finalPrice.toLocaleString()}</span>
-          
+
           <span className="text-muted-foreground">{language === 'ar' ? 'التكلفة:' : 'Cost:'}</span>
           <span>{finalCost.toLocaleString()}</span>
-          
+
           <span className="text-muted-foreground">{language === 'ar' ? 'الحالة:' : 'Status:'}</span>
           <span className={variant.is_active ? "text-success" : "text-muted-foreground"}>
-            {variant.is_active 
+            {variant.is_active
               ? (language === 'ar' ? 'نشط' : 'Active')
               : (language === 'ar' ? 'غير نشط' : 'Inactive')
             }
@@ -182,13 +184,13 @@ const StockMatrixGrid: React.FC<StockMatrixGridProps> = ({
             {uniqueColors.map(color => {
               const variant = getVariant(color?.id, undefined);
               const { content, className } = getCellContent(variant);
-              
+
               return (
                 <Tooltip key={color?.id}>
                   <TooltipTrigger asChild>
                     <div className="flex items-center gap-3 p-2 rounded-lg border border-border hover:border-primary/30 transition-colors cursor-default">
                       {color?.hex_code && (
-                        <span 
+                        <span
                           className="w-6 h-6 rounded-full border-2 border-background shadow-sm flex-shrink-0"
                           style={{ backgroundColor: color.hex_code }}
                         />
@@ -224,7 +226,7 @@ const StockMatrixGrid: React.FC<StockMatrixGridProps> = ({
             {uniqueSizes.map(size => {
               const variant = getVariant(undefined, size?.id);
               const { content, className } = getCellContent(variant);
-              
+
               return (
                 <Tooltip key={size?.id}>
                   <TooltipTrigger asChild>
@@ -252,77 +254,98 @@ const StockMatrixGrid: React.FC<StockMatrixGridProps> = ({
     );
   }
 
-  // Full matrix (colors × sizes)
+  // Full matrix (colors × sizes)\\\\\\\\\
+
   return (
     <TooltipProvider>
-      <ScrollArea className="max-h-80">
-        <div className="overflow-x-auto">
-          <table className="w-full border-collapse">
-            <thead>
-              <tr>
-                <th className="p-2 text-start text-sm font-medium text-muted-foreground border-b border-border sticky start-0 bg-background z-10">
-                  {language === 'ar' ? 'اللون / المقاس' : 'Color / Size'}
+      <ScrollArea className="w-full h-80 rounded-md border" dir={language === 'ar' ? 'rtl' : 'ltr'}>
+        <table className="w-max min-w-full border-collapse">
+          <thead>
+            <tr>
+              <th className="p-2 text-start text-sm font-medium text-muted-foreground border-b border-border sticky start-0 top-0 bg-background z-30 min-w-32">
+                {language === 'ar' ? 'اللون / المقاس' : 'Color / Size'}
+              </th>
+
+              {uniqueSizes.map(size => (
+                <th
+                  key={size?.id}
+                  className="p-2 text-center text-sm font-medium text-muted-foreground border-b border-border min-w-24 whitespace-nowrap sticky top-0 bg-background z-20"
+                >
+                  {language === 'ar' ? size?.name_ar || size?.name : size?.name}
                 </th>
-                {uniqueSizes.map(size => (
-                  <th 
-                    key={size?.id} 
-                    className="p-2 text-center text-sm font-medium text-muted-foreground border-b border-border min-w-16"
-                  >
-                    {language === 'ar' ? size?.name_ar || size?.name : size?.name}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {uniqueColors.map(color => (
-                <tr key={color?.id} className="hover:bg-muted/30 transition-colors">
-                  <td className="p-2 border-b border-border sticky start-0 bg-background z-10">
-                    <div className="flex items-center gap-2">
-                      {color?.hex_code && (
-                        <span 
-                          className="w-6 h-6 rounded-full border-2 border-slate-400 ring-1 ring-white shadow-sm flex-shrink-0"
-                          style={{ backgroundColor: color.hex_code }}
-                          title={`${color.name}: ${color.hex_code}`}
-                          aria-label={`${color.name} (${color.hex_code})`}
-                        />
-                      )}
-                      <span className="text-sm font-medium whitespace-nowrap">
-                        {language === 'ar' ? color?.name_ar || color?.name : color?.name}
-                      </span>
-                    </div>
-                  </td>
-                  {uniqueSizes.map(size => {
-                    const variant = getVariant(color?.id, size?.id);
-                    const { content, className } = getCellContent(variant);
-                    
-                    return (
-                      <td key={size?.id} className="p-1 border-b border-border text-center">
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <div className={cn(
-                              "px-2 py-2 rounded-md font-semibold text-sm cursor-default transition-all hover:ring-2 hover:ring-primary/30",
-                              className
-                            )}>
-                              {content}
-                            </div>
-                          </TooltipTrigger>
-                          {variant && (
-                            <TooltipContent side="top" className="p-3">
-                              {renderTooltipContent(variant)}
-                            </TooltipContent>
-                          )}
-                        </Tooltip>
-                      </td>
-                    );
-                  })}
-                </tr>
               ))}
-            </tbody>
-          </table>
-        </div>
-      </ScrollArea>
-    </TooltipProvider>
+            </tr>
+          </thead>
+
+          <tbody>
+            {uniqueColors.map(color => (
+              <tr
+                key={color?.id}
+                className="hover:bg-muted/30 transition-colors"
+              >
+                <td className="p-2 border-b border-border sticky start-0 bg-background z-10 min-w-32">
+                  <div className="flex items-center gap-2">
+                    {color?.hex_code && (
+                      <span
+                        className="w-6 h-6 rounded-full border-2 border-slate-400 ring-1 ring-white shadow-sm flex-shrink-0"
+                        style={{
+                          backgroundColor: color.hex_code
+                        }}
+                        title={`${color.name}: ${color.hex_code}`}
+                        aria-label={`${color.name} (${color.hex_code})`}
+                      />
+                    )}
+
+                    <span className="text-sm font-medium whitespace-nowrap">
+                      {language === 'ar'
+                        ? color?.name_ar || color?.name
+                        : color?.name}
+                    </span>
+                  </div>
+                </td>
+
+                {uniqueSizes.map(size => {
+                  const variant = getVariant(color?.id, size?.id);
+                  const { content, className } = getCellContent(variant);
+
+                  return (
+                    <td
+                      key={size?.id}
+                      className="p-1 border-b border-border text-center min-w-24"
+                    >
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <div
+                            className={cn(
+                              "px-2 py-2 rounded-md font-semibold text-sm cursor-default transition-all hover:ring-2 hover:ring-primary/30 whitespace-nowrap",
+                              className
+                            )}
+                          >
+                            {content}
+                          </div>
+                        </TooltipTrigger>
+
+                        {variant && (
+                          <TooltipContent side="top" className="p-3">
+                            {renderTooltipContent(variant)}
+                          </TooltipContent>
+                        )}
+                      </Tooltip>
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+
+
+        <ScrollBar orientation="vertical" />
+        <ScrollBar orientation="horizontal" />
+      </ScrollArea >
+    </TooltipProvider >
   );
+
 };
 
 export default StockMatrixGrid;
