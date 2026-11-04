@@ -450,7 +450,7 @@ const WarehouseTransfer = () => {
               rowKey: `${productId}-${unit.id}-${color.id}`,
               productId,
               productName: item.product_name,
-              unitId: unit.unit_id,
+              unitId: unit.id,
               unitName: unit.unit_name,
               colorId: color.color_id,
               colorName: color.color,
