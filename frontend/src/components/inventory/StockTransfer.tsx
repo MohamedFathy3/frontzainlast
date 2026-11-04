@@ -26,7 +26,6 @@ import {
   ArrowLeftRight,
   ArrowRight,
   ArrowLeft,
-  Barcode
 } from 'lucide-react';
 
 // ========== أنواع البيانات ==========
@@ -37,33 +36,43 @@ interface Warehouse {
   active: boolean;
 }
 
+interface ColorStock {
+  id: number;
+  color_id: number;
+  color: string;
+  stock: number;
+  total_stock?: number | null;
+  hex_code: string;
+  warehouse_stock?: number | null;                                     // ✅
+  warehouseStocks?: Array<{ warehouse_id: number; stock: number }>;    // ✅
+}
+
+interface UnitWithColors {
+  id: number;
+  unit_id: number;
+  unit_name: string;
+  cost_price: string;
+  sell_price: string;
+  barcode: string;
+  colors: ColorStock[];
+}
+
 interface WarehouseProduct {
   id: number;
+  name?: string;
   product_id?: number;
-  product_name: string;
-  warehouse_name: string;
+  product_name?: string;
+  warehouse_name?: string;
+  barcode?: string;
   stock: number;
-  cost: string;
+  cost?: string;
+  units?: UnitWithColors[];
   product?: {
     id: number;
     name: string;
     sku: string;
     barcode: string;
-    units: Array<{
-      id: number;
-      unit_id: number;
-      unit_name: string;
-      cost_price: string;
-      sell_price: string;
-      barcode: string;
-      colors: Array<{
-        id: number;
-        color_id: number;
-        color: string;
-        stock: number;
-        hex_code: string;
-      }>;
-    }>;
+    units: UnitWithColors[];
   };
 }
 
@@ -75,7 +84,43 @@ interface TransferProduct {
   note?: string;
 }
 
-const WarehouseTransfer = () => {
+/**
+ * ✅ الرصيد الفعلي للمنتج داخل المخزن:
+ * - منتج بدون units (بدون مقاسات/ألوان) → item.stock
+ * - منتج له units                        → مجموع warehouse_stock للألوان
+ */
+const computeEffectiveStock = (item: WarehouseProduct): number => {
+  const units = item.units || item.product?.units || [];
+
+  if (!units.length) {
+    return Number(item.stock) || 0;
+  }
+
+  return units.reduce((sum, unit) => {
+    return (
+      sum +
+      (unit.colors || []).reduce((colorSum, c) => {
+        let ws: number | null = null;
+
+        if (c.warehouse_stock != null) {
+          ws = Number(c.warehouse_stock);
+        } else if (
+          Array.isArray(c.warehouseStocks) &&
+          c.warehouseStocks.length > 0
+        ) {
+          ws = c.warehouseStocks.reduce(
+            (s, w) => s + (Number(w.stock) || 0),
+            0,
+          );
+        }
+
+        return colorSum + (ws ?? 0);
+      }, 0)
+    );
+  }, 0);
+};
+
+const StockTransfer = () => {
   const { language } = useLanguage();
   const queryClient = useQueryClient();
 
@@ -87,7 +132,7 @@ const WarehouseTransfer = () => {
   const [modalSearchText, setModalSearchText] = useState('');
   const [warehouseFilter, setWarehouseFilter] = useState<string>('all');
   const [transferItems, setTransferItems] = useState<TransferProduct[]>([]);
-  const [productNotes, setProductNotes] = useState<Record<number, string>>({});
+  const [productNotes, setProductNotes] = useState<Record<string, string>>({});
 
   // ========== Translation ==========
   const t = {
@@ -114,16 +159,13 @@ const WarehouseTransfer = () => {
       refresh: 'Refresh',
       transferSuccess: 'Transfer completed successfully',
       differentWarehouses: 'Source and destination must be different',
-      addProduct: 'Add',
-      remove: 'Remove',
       totalItems: 'Total Items',
       totalQuantity: 'Total Quantity',
       filter: 'Filter',
-      reset: 'Reset',
       error: 'Error',
       transferring: 'Transferring...',
       barcode: 'Barcode',
-      totalStock: 'Total Stock'
+      totalStock: 'Total Stock',
     },
     ar: {
       title: 'مخزون المخازن',
@@ -148,17 +190,14 @@ const WarehouseTransfer = () => {
       refresh: 'تحديث',
       transferSuccess: 'تم التحويل بنجاح',
       differentWarehouses: 'يجب أن يكون المخزنين مختلفين',
-      addProduct: 'إضافة',
-      remove: 'حذف',
       totalItems: 'إجمالي الأصناف',
       totalQuantity: 'إجمالي الكميات',
       filter: 'تصفية',
-      reset: 'إعادة تعيين',
       error: 'خطأ',
       transferring: 'جاري التحويل...',
       barcode: 'الباركود',
-      totalStock: 'إجمالي المخزون'
-    }
+      totalStock: 'إجمالي المخزون',
+    },
   }[language];
 
   // ========== 1. جلب المخازن ==========
@@ -169,32 +208,44 @@ const WarehouseTransfer = () => {
         filters: { active: true },
         orderBy: 'id',
         perPage: 100,
-        paginate: false
+        paginate: false,
       });
       return res.data.result === 'Success' ? res.data.data || [] : [];
-    }
+    },
   });
 
-  // ========== 2. جلب المنتجات في المخازن (للواجهة الرئيسية) ==========
+  // ========== 2. جلب المنتجات (الواجهة الرئيسية) ==========
   const { data: products = [], isLoading, refetch } = useQuery({
     queryKey: ['warehouse-products', warehouseFilter, searchText],
     queryFn: async () => {
+      if (warehouseFilter !== 'all') {
+        const res = await api.get(`/warehouses/${warehouseFilter}/products`);
+        const responseData = res.data?.data ?? res.data;
+
+        return Array.isArray(responseData)
+          ? responseData.map((item: any) => ({
+            ...item,
+            product_id: item.id,
+            product_name: item.name,
+            barcode: item.barcode || '',
+            warehouse_name:
+              warehouses.find(
+                (w: Warehouse) => w.id === Number(warehouseFilter),
+              )?.name || '',
+            stock: Number(item.stock) || 0,
+          }))
+          : [];
+      }
+
       const payload: any = {
         orderBy: 'id',
         perPage: 1000,
-        paginate: false
+        paginate: false,
       };
 
       const filters: any = {};
 
-      if (warehouseFilter !== 'all') {
-        const warehouse = warehouses.find((w: Warehouse) => w.id === parseInt(warehouseFilter));
-        if (warehouse) {
-          filters.warehouse_name = warehouse.name;
-        }
-      }
-
-      if (searchText && searchText.trim() !== '') {
+      if (searchText.trim()) {
         const searchValue = searchText.trim();
         if (/^\d+$/.test(searchValue)) {
           filters.barcode = searchValue;
@@ -213,57 +264,43 @@ const WarehouseTransfer = () => {
     refetchOnWindowFocus: false,
   });
 
-  // ========== 3. جلب منتجات المخزن المصدر (للمودال) ==========
-  const {
-    data: modalProducts = [],
-    isLoading: modalLoading,
-    refetch: refetchModal
-  } = useQuery({
+  // ========== 3. جلب منتجات المخزن المصدر (مودال) ==========
+  const { data: modalProducts = [], isLoading: modalLoading } = useQuery({
     queryKey: ['modal-warehouse-products', fromWarehouse, modalSearchText],
     queryFn: async () => {
       if (!fromWarehouse) return [];
 
-      const payload: any = {
-        orderBy: 'id',
-        perPage: 1000,
-        paginate: false
-      };
+      const res = await api.get(`/warehouses/${fromWarehouse}/products`);
+      const responseData = res.data?.data ?? res.data;
 
-      const filters: any = {};
+      let productsArray: any[] = Array.isArray(responseData)
+        ? responseData
+        : [];
 
-      // فلتر المخزن المصدر
-      const warehouse = warehouses.find((w: Warehouse) => w.id === parseInt(fromWarehouse));
-      if (warehouse) {
-        filters.warehouse_name = warehouse.name;
+      const search = modalSearchText.trim().toLowerCase();
+      if (search) {
+        productsArray = productsArray.filter((product: any) => {
+          const name = String(
+            product.name || product.product_name || '',
+          ).toLowerCase();
+          const barcode = String(product.barcode || '');
+          return name.includes(search) || barcode.includes(search);
+        });
       }
 
-      // فلتر البحث في المودال
-      if (modalSearchText && modalSearchText.trim() !== '') {
-        const searchValue = modalSearchText.trim();
-        if (/^\d+$/.test(searchValue)) {
-          filters.barcode = searchValue;
-        } else {
-          filters.product_name = searchValue;
-        }
-      }
-
-      if (Object.keys(filters).length > 0) {
-        payload.filters = filters;
-      }
-
-      console.log('📦 Modal fetch payload:', payload);
-
-      const res = await api.post('/warehouses/index-product', payload);
-      return res.data.result === 'Success' ? res.data.data || [] : [];
+      return productsArray;
     },
-    enabled: !!fromWarehouse, // فقط لما يكون المخزن المصدر محدد
+    enabled: !!fromWarehouse,
     refetchOnWindowFocus: false,
   });
 
-  // ========== 4. الإحصائيات ==========
+  // ========== 4. الإحصائيات ✅ بالرصيد الفعلي ==========
   const stats = useMemo(() => {
     const totalItems = products.length;
-    const totalStock = products.reduce((sum, p: WarehouseProduct) => sum + p.stock, 0);
+    const totalStock = products.reduce(
+      (sum, p: WarehouseProduct) => sum + computeEffectiveStock(p),
+      0,
+    );
     return { totalItems, totalStock };
   }, [products]);
 
@@ -272,33 +309,53 @@ const WarehouseTransfer = () => {
     mutationFn: async () => {
       if (!fromWarehouse) throw new Error('Select source warehouse');
       if (!toWarehouse) throw new Error('Select destination warehouse');
-      if (fromWarehouse === toWarehouse) throw new Error(t.differentWarehouses);
-      if (transferItems.length === 0) throw new Error('Add products to transfer');
+      if (fromWarehouse === toWarehouse)
+        throw new Error(t.differentWarehouses);
+      if (transferItems.length === 0)
+        throw new Error('Add products to transfer');
 
       const payload = {
         from_warehouse_id: parseInt(fromWarehouse),
         to_warehouse_id: parseInt(toWarehouse),
-        products: transferItems.map(item => ({
+        products: transferItems.map((item) => ({
           product_id: item.product_id,
-          ...(item.product_unit_id > 0 && { product_unit_id: item.product_unit_id }),
+          ...(item.product_unit_id > 0 && {
+            product_unit_id: item.product_unit_id,
+          }),
           ...(item.color_id > 0 && { color_id: item.color_id }),
           quantity: item.quantity,
-          ...(productNotes[`${item.product_id}-${item.product_unit_id}-${item.color_id}`]
-            ? { note: productNotes[`${item.product_id}-${item.product_unit_id}-${item.color_id}`] }
-            : {})
-
-        }))
+          ...(productNotes[
+            `${item.product_id}-${item.product_unit_id}-${item.color_id}`
+          ]
+            ? {
+              note:
+                productNotes[
+                `${item.product_id}-${item.product_unit_id}-${item.color_id}`
+                ],
+            }
+            : {}),
+        })),
       };
-
-      console.log('📦 Sending payload:', JSON.stringify(payload, null, 2));
 
       const res = await api.post('/warehouses/transfer', payload);
       return res.data;
     },
-    onSuccess: () => {
-      toast({ title: t.transferSuccess, description: t.transferSuccess });
-      queryClient.invalidateQueries({ queryKey: ['warehouse-products'] });
-      queryClient.invalidateQueries({ queryKey: ['modal-warehouse-products'] });
+    onSuccess: async (data) => {
+      toast({
+        title: t.transferSuccess,
+        description:
+          language === 'ar'
+            ? `تم تحويل ${data?.data?.total_quantity ?? 0} وحدة بنجاح`
+            : `Transferred ${data?.data?.total_quantity ?? 0} units successfully`,
+      });
+
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['warehouse-products'] }),
+        queryClient.invalidateQueries({
+          queryKey: ['modal-warehouse-products'],
+        }),
+      ]);
+
       setShowTransferModal(false);
       setTransferItems([]);
       setProductNotes({});
@@ -308,65 +365,65 @@ const WarehouseTransfer = () => {
     },
     onError: (error: AxiosError) => {
       const data = error.response?.data as any;
-      console.log('Validation errors:', JSON.stringify(data, null, 2));
-      // هتشوف exactly أي field فيه مشكلة
       toast({
         title: t.error,
         description: data?.errors
           ? Object.values(data.errors).flat().join(', ')
           : data?.message || error.message,
-        variant: 'destructive'
+        variant: 'destructive',
       });
-    }
+    },
   });
 
-  // ========== 6. إضافة منتج للتحويل ==========
-  const handleAddProduct = (rowKey: string, productId: number, unitId: number, colorId: number) => {
-    const exists = transferItems.find(item => item.product_id === productId && item.product_unit_id === unitId && item.color_id === colorId);
-    if (exists) {
-      setTransferItems(prev =>
-        prev.map(item =>
-          item.product_id === productId && item.product_unit_id === unitId && item.color_id === colorId
-            ? { ...item, quantity: item.quantity + 1 }
-            : item
-        )
-      );
-    } else {
-      setTransferItems(prev => [...prev, { product_id: productId, product_unit_id: unitId, color_id: colorId, quantity: 1 }]);
-    }
-  };
-
   // ========== 7. تغيير الكمية ==========
-
-  const handleQuantityChange = (productId: number, unitId: number, colorId: number, quantity: number) => {
-    const row = flattenedModalProducts.find(r => r.productId === productId && r.unitId === unitId && r.colorId === colorId);
+  const handleQuantityChange = (
+    productId: number,
+    unitId: number,
+    colorId: number,
+    quantity: number,
+  ) => {
+    const row = flattenedModalProducts.find(
+      (r) =>
+        r.productId === productId &&
+        r.unitId === unitId &&
+        r.colorId === colorId,
+    );
     if (!row) return;
-    setTransferItems(prev =>
-      prev.map(item =>
-        item.product_id === productId && item.product_unit_id === unitId && item.color_id === colorId
+
+    setTransferItems((prev) =>
+      prev.map((item) =>
+        item.product_id === productId &&
+          item.product_unit_id === unitId &&
+          item.color_id === colorId
           ? { ...item, quantity: Math.min(Math.max(1, quantity), row.stock) }
-          : item
-      )
+          : item,
+      ),
     );
   };
 
-  // ========== 8. تغيير الملاحظة ==========
   // ========== 8. تغيير الملاحظة ==========
   const handleNoteChange = (noteKey: string, note: string) => {
-    setProductNotes(prev => ({
-      ...prev,
-      [noteKey]: note
-    }));
+    setProductNotes((prev) => ({ ...prev, [noteKey]: note }));
   };
 
   // ========== 9. حذف منتج ==========
-  // ========== 9. حذف منتج ==========
-  const handleRemoveProduct = (productId: number, unitId: number, colorId: number) => {
+  const handleRemoveProduct = (
+    productId: number,
+    unitId: number,
+    colorId: number,
+  ) => {
     const noteKey = `${productId}-${unitId}-${colorId}`;
-    setTransferItems(prev =>
-      prev.filter(item => !(item.product_id === productId && item.product_unit_id === unitId && item.color_id === colorId))
+    setTransferItems((prev) =>
+      prev.filter(
+        (item) =>
+          !(
+            item.product_id === productId &&
+            item.product_unit_id === unitId &&
+            item.color_id === colorId
+          ),
+      ),
     );
-    setProductNotes(prev => {
+    setProductNotes((prev) => {
       const newNotes = { ...prev };
       delete newNotes[noteKey];
       return newNotes;
@@ -401,13 +458,14 @@ const WarehouseTransfer = () => {
 
   // ========== 12. اسم المخزن ==========
   const getWarehouseName = (warehouseId: string) => {
-    const w = warehouses.find((w: Warehouse) => w.id === parseInt(warehouseId));
+    const w = warehouses.find(
+      (w: Warehouse) => w.id === parseInt(warehouseId),
+    );
     if (!w) return '-';
     return language === 'ar' ? w.name_ar || w.name : w.name;
   };
 
-
-  // تحويل المنتجات لصفوف مسطحة (unit × color)
+  // ========== 13. تفليط المنتجات (unit × color) ==========
   const flattenedModalProducts = useMemo(() => {
     const rows: Array<{
       rowKey: string;
@@ -420,52 +478,79 @@ const WarehouseTransfer = () => {
       hexCode: string;
       barcode: string;
       stock: number;
+      totalStock: number;
     }> = [];
 
     modalProducts.forEach((item: WarehouseProduct) => {
-      console.log('item.id:', item.id);
-      console.log('item.product_id:', item.product_id);
-      console.log('item.product?.id:', item.product?.id);
-      const productId = item.product?.id || item.product_id || item.id;
-      const units = item.product?.units || [];
+      const productId = Number(
+        item.product_id || item.product?.id || item.id,
+      );
+      const productName =
+        item.name || item.product_name || item.product?.name || '';
+      const units = item.units || item.product?.units || [];
 
-      if (units.length === 0) {
-        // منتج بدون variants
-        rows.push({
-          rowKey: `${productId}-0-0`,
-          productId,
-          productName: item.product_name,
-          unitId: 0,
-          unitName: '',
-          colorId: 0,
-          colorName: '',
-          hexCode: '',
-          barcode: item.product?.barcode || '',
-          stock: item.stock,
-        });
-      } else {
-        units.forEach(unit => {
-          unit.colors.forEach(color => {
-            rows.push({
-              rowKey: `${productId}-${unit.id}-${color.id}`,
-              productId,
-              productName: item.product_name,
-              unitId: unit.unit_id,
-              unitName: unit.unit_name,
-              colorId: color.color_id,
-              colorName: color.color,
-              hexCode: color.hex_code,
-              barcode: unit.barcode || item.product?.barcode || '',
-              stock: color.stock,
-            });
+      // منتج بدون مقاسات/ألوان
+      if (!units.length) {
+        const stock = Number(item.stock) || 0;
+        if (stock > 0) {
+          rows.push({
+            rowKey: `${productId}-0-0`,
+            productId,
+            productName,
+            unitId: 0,
+            unitName: '',
+            colorId: 0,
+            colorName: '',
+            hexCode: '',
+            barcode: item.barcode || item.product?.barcode || '',
+            stock,
+            totalStock: stock,
+          });
+        }
+        return;
+      }
+
+      // منتج بمقاسات وألوان
+      units.forEach((unit: UnitWithColors) => {
+        (unit.colors || []).forEach((color: ColorStock) => {
+          let warehouseQty: number | null = null;
+
+          if (color.warehouse_stock != null) {
+            warehouseQty = Number(color.warehouse_stock);
+          } else if (
+            Array.isArray(color.warehouseStocks) &&
+            color.warehouseStocks.length > 0
+          ) {
+            warehouseQty = Number(color.warehouseStocks[0].stock);
+          }
+
+          const stockForWarehouse =
+            warehouseQty != null ? warehouseQty : Number(color.stock) || 0;
+
+          const totalStock = Number(color.stock) || 0;
+
+          if (stockForWarehouse <= 0) return;
+
+          rows.push({
+            rowKey: `${productId}-${unit.id}-${color.color_id}`,
+            productId,
+            productName,
+            unitId: Number(unit.id),
+            unitName: unit.unit_name || '',
+            colorId: Number(color.color_id),
+            colorName: color.color || '',
+            hexCode: color.hex_code || '',
+            barcode:
+              unit.barcode || item.barcode || item.product?.barcode || '',
+            stock: stockForWarehouse,
+            totalStock,
           });
         });
-      }
+      });
     });
 
     return rows;
   }, [modalProducts]);
-
 
   return (
     <div className="space-y-4">
@@ -506,7 +591,9 @@ const WarehouseTransfer = () => {
             <Warehouse className="h-5 w-5 text-success" />
             <div>
               <p className="text-xs text-muted-foreground">{t.totalStock}</p>
-              <p className="text-lg font-bold">{stats.totalStock.toLocaleString()}</p>
+              <p className="text-lg font-bold">
+                {stats.totalStock.toLocaleString()}
+              </p>
             </div>
           </CardContent>
         </Card>
@@ -523,10 +610,10 @@ const WarehouseTransfer = () => {
         <CardContent>
           <div className="flex flex-col gap-3 lg:flex-row">
             <div className="flex-1">
-              <Select value={warehouseFilter} onValueChange={(value) => {
-                setWarehouseFilter(value);
-                setTimeout(() => refetch(), 100);
-              }}>
+              <Select
+                value={warehouseFilter}
+                onValueChange={setWarehouseFilter}
+              >
                 <SelectTrigger>
                   <SelectValue placeholder={t.allWarehouses} />
                 </SelectTrigger>
@@ -565,49 +652,67 @@ const WarehouseTransfer = () => {
         <CardContent className="p-0">
           <ScrollArea className="h-[400px] w-full">
             <div className="min-w-[900px]">
-            <Table>
-              <TableHeader className="sticky top-0 bg-background">
-                <TableRow>
-                  <TableHead>{t.product}</TableHead>
-                  <TableHead>{t.barcode}</TableHead>
-                  <TableHead>{t.warehouse}</TableHead>
-                  <TableHead className="text-center">{t.stock}</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {isLoading ? (
+              <Table>
+                <TableHeader className="sticky top-0 bg-background">
                   <TableRow>
-                    <TableCell colSpan={4} className="text-center py-8">
-                      {t.loading}
-                    </TableCell>
+                    <TableHead>{t.product}</TableHead>
+                    <TableHead>{t.barcode}</TableHead>
+                    <TableHead>{t.warehouse}</TableHead>
+                    <TableHead className="text-center">{t.stock}</TableHead>
                   </TableRow>
-                ) : products.length === 0 ? (
-                  <TableRow>
-                    <TableCell colSpan={4} className="text-center py-8 text-muted-foreground">
-                      <Package className="h-12 w-12 mx-auto mb-2 opacity-20" />
-                      {t.noData}
-                    </TableCell>
-                  </TableRow>
-                ) : (
-                  products.map((item: WarehouseProduct) => (
-                    <TableRow key={item.id}>
-                      <TableCell className="font-medium">{item.product_name}</TableCell>
-                      <TableCell>
-                        <Badge variant="outline" className="font-mono">
-                          {item.barcode || '-'}
-                        </Badge>
-                      </TableCell>
-                      <TableCell>{item.warehouse_name}</TableCell>
-                      <TableCell className="text-center">
-                        <Badge variant={item.stock > 10 ? 'outline' : item.stock > 0 ? 'secondary' : 'destructive'}>
-                          {item.stock}
-                        </Badge>
+                </TableHeader>
+                <TableBody>
+                  {isLoading ? (
+                    <TableRow>
+                      <TableCell colSpan={4} className="text-center py-8">
+                        {t.loading}
                       </TableCell>
                     </TableRow>
-                  ))
-                )}
-              </TableBody>
-            </Table>
+                  ) : products.length === 0 ? (
+                    <TableRow>
+                      <TableCell
+                        colSpan={4}
+                        className="text-center py-8 text-muted-foreground"
+                      >
+                        <Package className="h-12 w-12 mx-auto mb-2 opacity-20" />
+                        {t.noData}
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    products.map((item: WarehouseProduct) => {
+                      // ✅ الرصيد الفعلي بدل item.stock
+                      const effective = computeEffectiveStock(item);
+
+                      return (
+                        <TableRow key={item.id}>
+                          <TableCell className="font-medium">
+                            {item.product_name}
+                          </TableCell>
+                          <TableCell>
+                            <Badge variant="outline" className="font-mono">
+                              {item.barcode || '-'}
+                            </Badge>
+                          </TableCell>
+                          <TableCell>{item.warehouse_name}</TableCell>
+                          <TableCell className="text-center">
+                            <Badge
+                              variant={
+                                effective > 10
+                                  ? 'outline'
+                                  : effective > 0
+                                    ? 'secondary'
+                                    : 'destructive'
+                              }
+                            >
+                              {effective}
+                            </Badge>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })
+                  )}
+                </TableBody>
+              </Table>
             </div>
             <ScrollBar orientation="horizontal" />
           </ScrollArea>
@@ -625,16 +730,21 @@ const WarehouseTransfer = () => {
           </DialogHeader>
 
           <div className="space-y-4 py-4">
-            {/* اختيار المخازن */}
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label>{t.fromWarehouse} <span className="text-destructive">*</span></Label>
-                <Select value={fromWarehouse} onValueChange={(value) => {
-                  setFromWarehouse(value);
-                  setModalSearchText('');
-                  setTransferItems([]);
-                  setProductNotes({});
-                }}>
+                <Label>
+                  {t.fromWarehouse}{' '}
+                  <span className="text-destructive">*</span>
+                </Label>
+                <Select
+                  value={fromWarehouse}
+                  onValueChange={(value) => {
+                    setFromWarehouse(value);
+                    setModalSearchText('');
+                    setTransferItems([]);
+                    setProductNotes({});
+                  }}
+                >
                   <SelectTrigger>
                     <SelectValue placeholder={t.selectFrom} />
                   </SelectTrigger>
@@ -648,7 +758,10 @@ const WarehouseTransfer = () => {
                 </Select>
               </div>
               <div className="space-y-2">
-                <Label>{t.toWarehouse} <span className="text-destructive">*</span></Label>
+                <Label>
+                  {t.toWarehouse}{' '}
+                  <span className="text-destructive">*</span>
+                </Label>
                 <Select
                   value={toWarehouse}
                   onValueChange={setToWarehouse}
@@ -659,7 +772,10 @@ const WarehouseTransfer = () => {
                   </SelectTrigger>
                   <SelectContent>
                     {warehouses
-                      .filter((w: Warehouse) => w.id.toString() !== fromWarehouse)
+                      .filter(
+                        (w: Warehouse) =>
+                          w.id.toString() !== fromWarehouse,
+                      )
                       .map((w: Warehouse) => (
                         <SelectItem key={w.id} value={w.id.toString()}>
                           {language === 'ar' ? w.name_ar || w.name : w.name}
@@ -670,19 +786,14 @@ const WarehouseTransfer = () => {
               </div>
             </div>
 
-            {/* جدول منتجات المخزن المصدر */}
             {fromWarehouse && toWarehouse && (
               <>
-                {/* مدخل البحث داخل المودال */}
                 <div className="relative">
                   <Search className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                   <Input
                     placeholder={t.search}
                     value={modalSearchText}
-                    onChange={(e) => {
-                      setModalSearchText(e.target.value);
-                      // الـ refetchModal هتشتغل تلقائياً لأن modalSearchText في الـ queryKey
-                    }}
+                    onChange={(e) => setModalSearchText(e.target.value)}
                     className="pr-9"
                   />
                   {modalSearchText && (
@@ -701,7 +812,9 @@ const WarehouseTransfer = () => {
                   <div className="p-3 bg-muted/30 border-b flex items-center justify-between gap-2">
                     <div className="flex items-center gap-2">
                       <ArrowRight className="h-4 w-4 text-primary" />
-                      <span className="font-medium">{t.fromWarehouse}: {getWarehouseName(fromWarehouse)}</span>
+                      <span className="font-medium">
+                        {t.fromWarehouse}: {getWarehouseName(fromWarehouse)}
+                      </span>
                     </div>
                     {modalSearchText && (
                       <Badge variant="secondary" className="gap-1">
@@ -715,11 +828,19 @@ const WarehouseTransfer = () => {
                       <TableHeader className="sticky top-0 bg-background">
                         <TableRow>
                           <TableHead>{t.product}</TableHead>
-                          <TableHead>{language === 'ar' ? 'المقاس' : 'Size'}</TableHead>
-                          <TableHead>{language === 'ar' ? 'اللون' : 'Color'}</TableHead>
+                          <TableHead>
+                            {language === 'ar' ? 'المقاس' : 'Size'}
+                          </TableHead>
+                          <TableHead>
+                            {language === 'ar' ? 'اللون' : 'Color'}
+                          </TableHead>
                           <TableHead>{t.barcode}</TableHead>
-                          <TableHead className="w-24 text-center">{t.stock}</TableHead>
-                          <TableHead className="w-24 text-center">{t.quantity}</TableHead>
+                          <TableHead className="w-24 text-center">
+                            {t.stock}
+                          </TableHead>
+                          <TableHead className="w-24 text-center">
+                            {t.quantity}
+                          </TableHead>
                           <TableHead className="w-32">{t.note}</TableHead>
                           <TableHead className="w-10"></TableHead>
                         </TableRow>
@@ -727,14 +848,24 @@ const WarehouseTransfer = () => {
                       <TableBody>
                         {modalLoading ? (
                           <TableRow>
-                            <TableCell colSpan={8} className="text-center py-8">{t.loading}</TableCell>
+                            <TableCell colSpan={8} className="text-center py-8">
+                              {t.loading}
+                            </TableCell>
                           </TableRow>
                         ) : flattenedModalProducts.length === 0 ? (
                           <TableRow>
-                            <TableCell colSpan={8} className="text-center py-8 text-muted-foreground">
+                            <TableCell
+                              colSpan={8}
+                              className="text-center py-8 text-muted-foreground"
+                            >
                               <Package className="h-10 w-10 mx-auto mb-2 opacity-20" />
                               {modalSearchText ? (
-                                <span>{t.noData} <span className="font-mono">"{modalSearchText}"</span></span>
+                                <span>
+                                  {t.noData}{' '}
+                                  <span className="font-mono">
+                                    "{modalSearchText}"
+                                  </span>
+                                </span>
                               ) : (
                                 t.noData
                               )}
@@ -743,33 +874,68 @@ const WarehouseTransfer = () => {
                         ) : (
                           flattenedModalProducts.map((row) => {
                             const transferItem = transferItems.find(
-                              item => item.product_id === row.productId && item.product_unit_id === row.unitId && item.color_id === row.colorId
+                              (item) =>
+                                item.product_id === row.productId &&
+                                item.product_unit_id === row.unitId &&
+                                item.color_id === row.colorId,
                             );
                             const noteKey = `${row.productId}-${row.unitId}-${row.colorId}`;
+
                             return (
-                              <TableRow key={row.rowKey} className={transferItem ? 'bg-primary/5' : ''}>
-                                <TableCell className="font-medium text-xs">{row.productName}</TableCell>
+                              <TableRow
+                                key={row.rowKey}
+                                className={transferItem ? 'bg-primary/5' : ''}
+                              >
+                                <TableCell className="font-medium text-xs">
+                                  {row.productName}
+                                </TableCell>
                                 <TableCell>
                                   {row.unitName ? (
-                                    <Badge variant="secondary" className="text-xs">{row.unitName}</Badge>
-                                  ) : '-'}
+                                    <Badge
+                                      variant="secondary"
+                                      className="text-xs"
+                                    >
+                                      {row.unitName}
+                                    </Badge>
+                                  ) : (
+                                    '-'
+                                  )}
                                 </TableCell>
                                 <TableCell>
                                   {row.colorName ? (
                                     <div className="flex items-center gap-1.5">
                                       <span
                                         className="inline-block w-4 h-4 rounded-full border border-border"
-                                        style={{ backgroundColor: row.hexCode }}
+                                        style={{
+                                          backgroundColor: row.hexCode,
+                                        }}
                                       />
-                                      <span className="text-xs">{row.colorName}</span>
+                                      <span className="text-xs">
+                                        {row.colorName}
+                                      </span>
                                     </div>
-                                  ) : '-'}
+                                  ) : (
+                                    '-'
+                                  )}
                                 </TableCell>
                                 <TableCell>
-                                  <Badge variant="outline" className="font-mono text-xs">{row.barcode || '-'}</Badge>
+                                  <Badge
+                                    variant="outline"
+                                    className="font-mono text-xs"
+                                  >
+                                    {row.barcode || '-'}
+                                  </Badge>
                                 </TableCell>
                                 <TableCell className="text-center">
-                                  <Badge variant={row.stock > 0 ? 'secondary' : 'destructive'}>{row.stock}</Badge>
+                                  <Badge
+                                    variant={
+                                      row.stock > 0
+                                        ? 'secondary'
+                                        : 'destructive'
+                                    }
+                                  >
+                                    {row.stock}
+                                  </Badge>
                                 </TableCell>
                                 <TableCell className="text-center">
                                   <Input
@@ -778,18 +944,44 @@ const WarehouseTransfer = () => {
                                     max={row.stock}
                                     value={transferItem?.quantity || ''}
                                     onChange={(e) => {
-                                      const qty = parseInt(e.target.value) || 0;
+                                      const qty =
+                                        parseInt(e.target.value) || 0;
                                       if (qty > 0) {
                                         if (transferItem) {
-                                          handleQuantityChange(row.productId, row.unitId, row.colorId, qty);
+                                          handleQuantityChange(
+                                            row.productId,
+                                            row.unitId,
+                                            row.colorId,
+                                            qty,
+                                          );
                                         } else {
-                                          setTransferItems(prev => [
+                                          if (qty > row.stock) {
+                                            toast({
+                                              title: t.error,
+                                              description:
+                                                language === 'ar'
+                                                  ? `الكمية المطلوبة أكبر من المتاح (${row.stock})`
+                                                  : `Requested quantity exceeds available stock (${row.stock})`,
+                                              variant: 'destructive',
+                                            });
+                                            return;
+                                          }
+                                          setTransferItems((prev) => [
                                             ...prev,
-                                            { product_id: row.productId, product_unit_id: row.unitId, color_id: row.colorId, quantity: qty }
+                                            {
+                                              product_id: row.productId,
+                                              product_unit_id: row.unitId,
+                                              color_id: row.colorId,
+                                              quantity: qty,
+                                            },
                                           ]);
                                         }
                                       } else if (transferItem) {
-                                        handleRemoveProduct(row.productId, row.unitId, row.colorId);
+                                        handleRemoveProduct(
+                                          row.productId,
+                                          row.unitId,
+                                          row.colorId,
+                                        );
                                       }
                                     }}
                                     className="w-20 text-center mx-auto"
@@ -800,7 +992,12 @@ const WarehouseTransfer = () => {
                                 <TableCell>
                                   <Input
                                     value={productNotes[noteKey] || ''}
-                                    onChange={(e) => handleNoteChange(noteKey, e.target.value)}
+                                    onChange={(e) =>
+                                      handleNoteChange(
+                                        noteKey,
+                                        e.target.value,
+                                      )
+                                    }
                                     placeholder={t.note}
                                     disabled={!transferItem}
                                     className="h-8 text-xs"
@@ -811,7 +1008,13 @@ const WarehouseTransfer = () => {
                                     <Button
                                       variant="ghost"
                                       size="icon"
-                                      onClick={() => handleRemoveProduct(row.productId, row.unitId, row.colorId)}
+                                      onClick={() =>
+                                        handleRemoveProduct(
+                                          row.productId,
+                                          row.unitId,
+                                          row.colorId,
+                                        )
+                                      }
                                       className="h-8 w-8 text-destructive hover:text-destructive"
                                     >
                                       <X className="h-4 w-4" />
@@ -827,28 +1030,40 @@ const WarehouseTransfer = () => {
                   </ScrollArea>
                 </div>
 
-                {/* ملخص التحويل */}
                 {transferItems.length > 0 && (
                   <div className="bg-gradient-to-r from-primary/10 to-primary/5 p-4 rounded-lg border border-primary/20">
                     <div className="flex justify-between items-center">
                       <div className="flex items-center gap-6">
                         <div>
-                          <p className="text-sm text-muted-foreground">{t.totalItems}</p>
-                          <p className="text-2xl font-bold text-primary">{transferItems.length}</p>
+                          <p className="text-sm text-muted-foreground">
+                            {t.totalItems}
+                          </p>
+                          <p className="text-2xl font-bold text-primary">
+                            {transferItems.length}
+                          </p>
                         </div>
                         <div className="h-10 w-px bg-border" />
                         <div>
-                          <p className="text-sm text-muted-foreground">{t.totalQuantity}</p>
+                          <p className="text-sm text-muted-foreground">
+                            {t.totalQuantity}
+                          </p>
                           <p className="text-2xl font-bold text-primary">
-                            {transferItems.reduce((sum, item) => sum + item.quantity, 0)}
+                            {transferItems.reduce(
+                              (sum, item) => sum + item.quantity,
+                              0,
+                            )}
                           </p>
                         </div>
                       </div>
                       <div className="flex items-center gap-3">
                         <ArrowLeft className="h-5 w-5 text-success" />
                         <div className="text-right">
-                          <p className="text-xs text-muted-foreground">{t.toWarehouse}</p>
-                          <p className="font-bold text-success">{getWarehouseName(toWarehouse)}</p>
+                          <p className="text-xs text-muted-foreground">
+                            {t.toWarehouse}
+                          </p>
+                          <p className="font-bold text-success">
+                            {getWarehouseName(toWarehouse)}
+                          </p>
                         </div>
                       </div>
                     </div>
@@ -892,4 +1107,4 @@ const WarehouseTransfer = () => {
   );
 };
 
-export default WarehouseTransfer;
+export default StockTransfer;
