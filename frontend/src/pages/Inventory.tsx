@@ -1067,6 +1067,7 @@ const Inventory: React.FC = () => {
           setSelectedProductForVariants(null);
         }}
         product={selectedProductForVariants}
+        warehouseId={warehouseFilter !== 'all' ? Number(warehouseFilter) : undefined}
         onEditProduct={() => {
           setShowVariantsModal(false);
           if (selectedProductForVariants) {
