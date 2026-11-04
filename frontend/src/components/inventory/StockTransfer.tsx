@@ -489,7 +489,6 @@ const StockTransfer = () => {
         item.name || item.product_name || item.product?.name || '';
       const units = item.units || item.product?.units || [];
 
-<<<<<<< HEAD
       // منتج بدون مقاسات/ألوان
       if (!units.length) {
         const stock = Number(item.stock) || 0;
@@ -545,37 +544,7 @@ const StockTransfer = () => {
               unit.barcode || item.barcode || item.product?.barcode || '',
             stock: stockForWarehouse,
             totalStock,
-=======
-      if (units.length === 0) {
-        // منتج بدون variants
-        rows.push({
-          rowKey: `${productId}-0-0`,
-          productId,
-          productName: item.product_name,
-          unitId: 0,
-          unitName: '',
-          colorId: 0,
-          colorName: '',
-          hexCode: '',
-          barcode: item.product?.barcode || '',
-          stock: item.stock,
-        });
-      } else {
-        units.forEach(unit => {
-          unit.colors.forEach(color => {
-            rows.push({
-              rowKey: `${productId}-${unit.id}-${color.id}`,
-              productId,
-              productName: item.product_name,
-              unitId: unit.id,
-              unitName: unit.unit_name,
-              colorId: color.color_id,
-              colorName: color.color,
-              hexCode: color.hex_code,
-              barcode: unit.barcode || item.product?.barcode || '',
-              stock: color.stock,
-            });
->>>>>>> d4657a86d75e6fbcbe07effc7d5a5a90365f8e5d
+
           });
         });
       });
@@ -1139,8 +1108,4 @@ const StockTransfer = () => {
   );
 };
 
-<<<<<<< HEAD
 export default StockTransfer;
-=======
-export default WarehouseTransfer;
->>>>>>> d4657a86d75e6fbcbe07effc7d5a5a90365f8e5d
