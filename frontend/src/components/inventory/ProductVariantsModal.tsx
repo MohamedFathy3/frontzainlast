@@ -118,7 +118,7 @@ const ProductVariantsModal: React.FC<ProductVariantsModalProps> = ({
         // ✅ مرّر ?warehouse_id= لو موجود
         const url =
           warehouseId != null && warehouseId !== '' && warehouseId !== 'all'
-            ? `/product/${product.id}?warehouse_id=${warehouseId}`
+            ? `/product/${product.id}?warehouse_id=${Number(warehouseId)}`
             : `/product/${product.id}`;
 
         const response = await api.get(url);
