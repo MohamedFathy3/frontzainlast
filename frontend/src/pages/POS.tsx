@@ -7,8 +7,8 @@ import { useApp } from '@/contexts/AppContext';
 import { useRegionalSettings } from '@/contexts/RegionalSettingsContext';
 import { useCurrencyTax } from '@/hooks/useCurrencyTax';
 import { cn } from '@/lib/utils';
-import { 
-  Search, Barcode, Home, LogOut, Loader2, Crown, Clock, User, 
+import {
+  Search, Barcode, Home, LogOut, Loader2, Crown, Clock, User,
   Truck, RotateCcw, DollarSign, Building2, Wifi, WifiOff, RefreshCw,
   ShoppingBag, AlertCircle, CheckCircle2,
   UserCheck, TrendingDown
@@ -33,11 +33,11 @@ import { useAuth } from '@/contexts/AuthContext';
 import { usePOSKeyboardShortcuts, getPOSShortcuts } from '@/hooks/usePOSKeyboardShortcuts';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { Link } from 'react-router-dom';
-import { 
-  saveOrderOffline, 
-  getUnsyncedOrders, 
-  markOrderSynced, 
-  getOfflineStats 
+import {
+  saveOrderOffline,
+  getUnsyncedOrders,
+  markOrderSynced,
+  getOfflineStats
 } from '@/lib/offlineDB';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent } from '@/components/ui/card';
@@ -46,6 +46,7 @@ import POSDeliverySelector from '@/components/pos/POSDeliverySelector';
 import POSSalesRepSelector from '@/components/pos/POSSalesRepSelector';
 import api from '@/lib/api';
 import { useLoyaltySettings } from '@/hooks/useLoyaltySettings';
+import { useWarehouses } from '@/hooks/usePurchaseFormData';
 
 // ==================== Interfaces ====================
 interface DeliveryMan {
@@ -123,12 +124,11 @@ interface OfflineStats {
 // ==================== Main Component ====================
 const POS: React.FC = () => {
   const { language } = useLanguage();
-  const { userBranch, currentBranch,  } = useApp();
+  const { userBranch, currentBranch, } = useApp();
   const { formatCurrency } = useRegionalSettings();
   const { taxRates } = useCurrencyTax();
   const { settings: loyaltySettings } = useLoyaltySettings(language);
   const navigate = useNavigate();
-  
   // ==================== States ====================
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('all');
@@ -168,15 +168,15 @@ const POS: React.FC = () => {
   useEffect(() => {
     if (isOffline) setRedeemedLoyaltyPoints(0);
   }, [isOffline]);
-  
+
   // ✅ متغيرات للتمييز بين مسح الباركود والبحث اليدوي
   const [isBarcodeScanning, setIsBarcodeScanning] = useState(false);
   const lastScannedBarcode = useRef<string>('');
   const scanTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const searchInputRef = useRef<HTMLInputElement>(null);
-  const { signOut,user } = useAuth();
-  
+  const { signOut, user } = useAuth();
+
   const [branchDetails, setBranchDetails] = useState<{
     phone?: string | null;
     address?: string | null;
@@ -187,7 +187,7 @@ const POS: React.FC = () => {
     const fetchBranchDetails = async () => {
       const branch = userBranch || currentBranch;
       if (!branch?.id) return;
-      
+
       try {
         const response = await api.get(`/branch/${branch.id}`);
         if (response.data?.data) {
@@ -206,11 +206,20 @@ const POS: React.FC = () => {
   }, [userBranch, currentBranch]);
 
   // ==================== Branch Data ====================
+  // ==================== Branch Data ====================
+  const posBranchId = userBranch?.id || currentBranch?.id;
+
+  // ✅ مخزن الفرع (للأرصدة في الـ variant selector)
+  const { data: branchWarehouses = [] } = useWarehouses(
+    posBranchId ? String(posBranchId) : '',
+    true,
+  );
+  const selectedWarehouseId = branchWarehouses[0]?.id ?? null;
+
   const branchData = useMemo(() => {
     const branch = userBranch || currentBranch;
-    
     if (!branch) return null;
-    
+
     return {
       id: branch.id,
       name: branch.name,
@@ -220,7 +229,6 @@ const POS: React.FC = () => {
       addressAr: branchDetails?.address_ar || branchDetails?.address || null
     };
   }, [userBranch, currentBranch, branchDetails]);
-  
   // ==================== Tax Logic ====================
   const getActiveTax = () => {
     if (!taxRates || taxRates.length === 0) return null;
@@ -249,8 +257,8 @@ const POS: React.FC = () => {
       setIsOffline(true);
       toast({
         title: language === 'ar' ? 'أنت الآن في وضع عدم الاتصال' : 'You are offline',
-        description: language === 'ar' 
-          ? 'سيتم حفظ الفواتير محلياً ومزامنتها لاحقاً' 
+        description: language === 'ar'
+          ? 'سيتم حفظ الفواتير محلياً ومزامنتها لاحقاً'
           : 'Invoices will be saved locally and synced later',
         variant: 'destructive',
       });
@@ -300,7 +308,7 @@ const POS: React.FC = () => {
     setSyncing(true);
     try {
       const unsyncedOrders = await getUnsyncedOrders();
-      
+
       if (unsyncedOrders.length === 0) {
         toast({
           title: language === 'ar' ? 'لا توجد طلبات للمزامنة' : 'No orders to sync',
@@ -314,20 +322,20 @@ const POS: React.FC = () => {
       for (const order of unsyncedOrders) {
         try {
           await api.post('/invoice/store', {
-              customer_id: parseInt(order.customer_id || '1'),
-              items: order.items.map((item: any) => ({
-                product_id: parseInt(item.id),
-                quantity: item.quantity,
-                price: item.price,
-                color: item.colorName || null,
-                size: item.sizeName || null,
-                unit_id: item.unitId || null,
-                color_id: item.colorId || null
-              })),
-              payments: order.payments || [],
-              subtotal: order.subtotal,
-              tax: order.tax,
-              total: order.total,
+            customer_id: parseInt(order.customer_id || '1'),
+            items: order.items.map((item: any) => ({
+              product_id: parseInt(item.id),
+              quantity: item.quantity,
+              price: item.price,
+              color: item.colorName || null,
+              size: item.sizeName || null,
+              unit_id: item.unitId || null,
+              color_id: item.colorId || null
+            })),
+            payments: order.payments || [],
+            subtotal: order.subtotal,
+            tax: order.tax,
+            total: order.total,
           });
 
           await markOrderSynced(order.id);
@@ -339,10 +347,10 @@ const POS: React.FC = () => {
 
       await checkUnsyncedOrders();
       await loadOfflineStats();
-      
+
       toast({
         title: language === 'ar' ? 'تمت المزامنة' : 'Sync completed',
-        description: language === 'ar' 
+        description: language === 'ar'
           ? `تمت مزامنة ${successCount} طلب، فشل ${failCount}`
           : `${successCount} orders synced, ${failCount} failed`,
         variant: failCount > 0 ? 'destructive' : 'default',
@@ -360,16 +368,16 @@ const POS: React.FC = () => {
   // ==================== Data Fetching ====================
   const { data: categories, isLoading: categoriesLoading, isOffline: categoriesOffline } = useCategories();
   const { data: products, isLoading: productsLoading, isOffline: productsOffline } = useProducts(selectedCategory);
-  
+
   const { data: barcodeProduct } = useProductByBarcode(searchQuery);
 
   const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const value = e.target.value;
     setSearchQuery(value);
-    
+
     if (value.length >= 3) {
       setIsBarcodeScanning(true);
-      
+
       if (scanTimeoutRef.current) clearTimeout(scanTimeoutRef.current);
       scanTimeoutRef.current = setTimeout(() => {
         setIsBarcodeScanning(false);
@@ -380,20 +388,20 @@ const POS: React.FC = () => {
   };
 
   useEffect(() => {
-    console.log('🔍 Barcode scan result:', { 
-      barcodeProduct, 
+    console.log('🔍 Barcode scan result:', {
+      barcodeProduct,
       searchQuery,
     });
-    
+
     if (barcodeProduct && barcodeProduct.id) {
       console.log('✅ Adding product to cart:', barcodeProduct.name);
-      
+
       addToCart(barcodeProduct as Product);
       setSearchQuery('');
-      
+
       toast({
         title: language === 'ar' ? 'تمت الإضافة' : 'Added to cart',
-        description: language === 'ar' 
+        description: language === 'ar'
           ? (barcodeProduct.name_ar || barcodeProduct.name)
           : barcodeProduct.name,
       });
@@ -413,7 +421,7 @@ const POS: React.FC = () => {
 
   const transformedProducts = useMemo(() => {
     if (!products) return [];
-    
+
     return products.map((prod: Product) => ({
       id: prod.id.toString(),
       name: prod.name,
@@ -453,7 +461,7 @@ const POS: React.FC = () => {
         if (existing.stock !== undefined && existing.quantity >= existing.stock) {
           toast({
             title: language === 'ar' ? 'الكمية المطلوبة غير متوفرة' : 'Quantity not available',
-            description: language === 'ar' 
+            description: language === 'ar'
               ? `الحد الأقصى ${existing.stock} قطعة فقط`
               : `Maximum ${existing.stock} items only`,
             variant: 'destructive',
@@ -492,7 +500,7 @@ const POS: React.FC = () => {
     if (!selectedProductForVariant) return;
 
     const variantId = `${selectedProductForVariant.id}-${variant.unitId}-${variant.colorId}`;
-    
+
     setCartItems(prev => {
       const existing = prev.find(item => item.variantId === variantId);
       if (existing) {
@@ -537,15 +545,15 @@ const POS: React.FC = () => {
     } else {
       setCartItems(prev =>
         prev.map(item => {
-          const match = variantId 
-            ? item.variantId === variantId 
+          const match = variantId
+            ? item.variantId === variantId
             : item.id === itemKey && !item.variantId;
           if (match) {
             // التحقق من المخزون
             if (item.stock !== undefined && quantity > item.stock) {
               toast({
                 title: language === 'ar' ? 'الكمية المطلوبة غير متوفرة' : 'Quantity not available',
-                description: language === 'ar' 
+                description: language === 'ar'
                   ? `الحد الأقصى ${item.stock} قطعة فقط`
                   : `Maximum ${item.stock} items only`,
                 variant: 'destructive',
@@ -576,7 +584,7 @@ const POS: React.FC = () => {
 
   const holdOrder = () => {
     if (cartItems.length === 0) return;
-    
+
     const subtotal = calculateSubtotalAfterItemDiscounts();
     const tax = (subtotal * taxRate) / 100;
     const total = subtotal + tax;
@@ -591,7 +599,7 @@ const POS: React.FC = () => {
     setHeldOrders(prev => [...prev, newHeldOrder]);
     setCartItems([]);
     setRedeemedLoyaltyPoints(0);
-    
+
     toast({
       title: language === 'ar' ? 'تم تعليق الطلب' : 'Order held',
       description: language === 'ar' ? `رقم الطلب: ${newHeldOrder.id.slice(-4)}` : `Order #${newHeldOrder.id.slice(-4)}`
@@ -610,8 +618,8 @@ const POS: React.FC = () => {
   // ✅ دالة خصم المنتج
   const handleItemDiscountChange = (itemId: string, percentage: number, variantId?: string) => {
     setCartItems(prev => prev.map(item => {
-      const match = variantId 
-        ? item.variantId === variantId 
+      const match = variantId
+        ? item.variantId === variantId
         : item.id === itemId && !item.variantId;
       if (match) {
         return { ...item, discount_percentage: percentage };
@@ -634,7 +642,7 @@ const POS: React.FC = () => {
       return sum + (itemTotal * (1 - discountRate));
     }, 0);
   };
-  
+
   const calculateSubtotal = () => cartItems.reduce((sum, item) => sum + (item.price * item.quantity), 0);
   const calculateItemDiscountsTotal = () => {
     return cartItems.reduce((sum, item) => {
@@ -643,13 +651,13 @@ const POS: React.FC = () => {
       return sum + (itemTotal * discountRate);
     }, 0);
   };
-  
+
   const calculateSubtotalAfterAllDiscounts = () => {
     const afterItemDiscounts = calculateSubtotalAfterItemDiscounts();
     const invoiceDiscount = (afterItemDiscounts * invoiceDiscountPercentage) / 100;
     return afterItemDiscounts - invoiceDiscount;
   };
-  
+
   const calculateTax = () => (calculateSubtotalAfterAllDiscounts() * taxRate) / 100;
   const calculateTotal = () => calculateSubtotalAfterAllDiscounts() + calculateTax();
   const calculateLoyaltyDiscount = () => Number(Math.min(
@@ -659,35 +667,35 @@ const POS: React.FC = () => {
   const calculatePayableTotal = () => Math.max(0, Number((calculateTotal() - calculateLoyaltyDiscount()).toFixed(2)));
 
   // ==================== Payment Handlers ====================
-const handlePaymentComplete = async (payments: { method: string; amount: number }[], invoiceNum?: string) => {
- const finalInvoiceNumber = invoiceNum || invoiceNumber || `INV-${format(new Date(), 'yyyyMMdd')}-${Math.floor(Math.random() * 10000)}`;
-  
-  if (invoiceNum) {
-    setInvoiceNumber(invoiceNum);
-  }
-  
-  const orderData = {
-    items: cartItems.map(item => ({
-      ...item,
-      discount_percentage: item.discount_percentage || 0,
-      item_total: (item.price * item.quantity) * (1 - (item.discount_percentage || 0) / 100)
-    })),
-    invoice_number: finalInvoiceNumber,
-    subtotal: calculateSubtotal(),
-    item_discounts_total: calculateItemDiscountsTotal(),
-    invoice_discount_percentage: invoiceDiscountPercentage,
-    invoice_discount_amount: invoiceDiscountAmount,
-    subtotal_after_discounts: calculateSubtotalAfterAllDiscounts(),
-    tax: calculateTax(),
-    total: calculateTotal(),
-    customer_id: selectedCustomer?.id,
-    delivery_id: selectedDelivery?.id,
-    sales_rep_id: selectedSalesRep?.id,
-    shift_id: currentShift?.id,
-    payments
-  };
+  const handlePaymentComplete = async (payments: { method: string; amount: number }[], invoiceNum?: string) => {
+    const finalInvoiceNumber = invoiceNum || invoiceNumber || `INV-${format(new Date(), 'yyyyMMdd')}-${Math.floor(Math.random() * 10000)}`;
 
-  console.log('📦 Order Data:', orderData);
+    if (invoiceNum) {
+      setInvoiceNumber(invoiceNum);
+    }
+
+    const orderData = {
+      items: cartItems.map(item => ({
+        ...item,
+        discount_percentage: item.discount_percentage || 0,
+        item_total: (item.price * item.quantity) * (1 - (item.discount_percentage || 0) / 100)
+      })),
+      invoice_number: finalInvoiceNumber,
+      subtotal: calculateSubtotal(),
+      item_discounts_total: calculateItemDiscountsTotal(),
+      invoice_discount_percentage: invoiceDiscountPercentage,
+      invoice_discount_amount: invoiceDiscountAmount,
+      subtotal_after_discounts: calculateSubtotalAfterAllDiscounts(),
+      tax: calculateTax(),
+      total: calculateTotal(),
+      customer_id: selectedCustomer?.id,
+      delivery_id: selectedDelivery?.id,
+      sales_rep_id: selectedSalesRep?.id,
+      shift_id: currentShift?.id,
+      payments
+    };
+
+    console.log('📦 Order Data:', orderData);
 
     if (!navigator.onLine || isOffline) {
       try {
@@ -701,15 +709,15 @@ const handlePaymentComplete = async (payments: { method: string; amount: number 
           payment_method: payments[0]?.method,
           payments
         });
-        
+
         if (orderId) {
           await checkUnsyncedOrders();
           await loadOfflineStats();
-          
+
           toast({
             title: language === 'ar' ? 'تم حفظ الطلب محلياً' : 'Order saved locally',
-            description: language === 'ar' 
-              ? `رقم الطلب: ${orderId.slice(-8)}` 
+            description: language === 'ar'
+              ? `رقم الطلب: ${orderId.slice(-8)}`
               : `Order #: ${orderId.slice(-8)}`,
           });
         }
@@ -827,7 +835,7 @@ const handlePaymentComplete = async (payments: { method: string; amount: number 
                 {language === 'ar' ? 'نقطة البيع' : 'Point of Sale'}
               </h1>
             </div>
-            
+
             {/* Offline/Online Status */}
             <div className={cn(
               "flex items-center gap-1.5 px-3 py-1 rounded-full text-sm font-medium",
@@ -836,22 +844,22 @@ const handlePaymentComplete = async (payments: { method: string; amount: number 
               {isOffline ? <WifiOff size={14} /> : <Wifi size={14} />}
               <span>{isOffline ? (language === 'ar' ? 'بدون نت' : 'Offline') : (language === 'ar' ? 'متصل' : 'Online')}</span>
             </div>
-            
+
             {/* Branch Info */}
             {(userBranch || currentBranch) && (
               <div className="flex items-center gap-1.5 px-3 py-1 bg-primary/20 text-primary rounded-full text-sm font-medium">
                 <Building2 size={14} />
                 <span>
-                  {userBranch 
+                  {userBranch
                     ? (language === 'ar' && userBranch.name_ar ? userBranch.name_ar : userBranch.name)
-                    : currentBranch 
+                    : currentBranch
                       ? (language === 'ar' && currentBranch.name_ar ? currentBranch.name_ar : currentBranch.name)
                       : null
                   }
                 </span>
               </div>
             )}
-            
+
             {/* User Info */}
             <div className="flex items-center gap-2 px-3 py-1 bg-gray-50 rounded-xl shadow-sm">
               <div className="w-5 h-5 flex items-center justify-center rounded-full bg-blue-500 text-white">
@@ -861,7 +869,7 @@ const handlePaymentComplete = async (payments: { method: string; amount: number 
                 <span className="text-sm font-semibold text-gray-800">{user?.name}</span>
               </div>
             </div>
-            
+
             {currentShift && (
               <span className="px-2 py-1 bg-violet-500/20 text-violet-400 rounded text-xs font-medium">
                 {language === 'ar' ? 'الوردية نشطة' : 'Shift Active'}
@@ -874,9 +882,9 @@ const handlePaymentComplete = async (payments: { method: string; amount: number 
             <div className="flex items-center gap-1.5 me-2 border-e border-white/20 pe-3">
               {/* Sync Button */}
               {unsyncedCount > 0 && (
-                <Button 
-                  variant="ghost" 
-                  size="sm" 
+                <Button
+                  variant="ghost"
+                  size="sm"
                   onClick={syncOfflineOrders}
                   disabled={syncing || isOffline}
                   className="text-blue-400 hover:text-blue-300 hover:bg-blue-500/20 relative gap-1.5 px-2"
@@ -890,9 +898,9 @@ const handlePaymentComplete = async (payments: { method: string; amount: number 
               )}
 
               {/* Held Orders */}
-              <Button 
-                variant="ghost" 
-                size="sm" 
+              <Button
+                variant="ghost"
+                size="sm"
                 onClick={() => setShowHeldOrders(true)}
                 className="text-amber-400 hover:text-amber-300 hover:bg-amber-500/20 relative gap-1.5 px-2"
               >
@@ -906,14 +914,14 @@ const handlePaymentComplete = async (payments: { method: string; amount: number 
               </Button>
 
               {/* Customer */}
-              <Button 
-                variant="ghost" 
-                size="sm" 
+              <Button
+                variant="ghost"
+                size="sm"
                 onClick={() => setShowCustomerSelector(true)}
                 className={cn(
                   "gap-1.5 px-2",
-                  selectedCustomer 
-                    ? "text-cyan-400 hover:text-cyan-300 hover:bg-cyan-500/20" 
+                  selectedCustomer
+                    ? "text-cyan-400 hover:text-cyan-300 hover:bg-cyan-500/20"
                     : "text-cyan-400/70 hover:text-cyan-300 hover:bg-cyan-500/20"
                 )}
               >
@@ -922,14 +930,14 @@ const handlePaymentComplete = async (payments: { method: string; amount: number 
               </Button>
 
               {/* Delivery Man Button */}
-              <Button 
-                variant="ghost" 
-                size="sm" 
+              <Button
+                variant="ghost"
+                size="sm"
                 onClick={() => setShowDeliverySelector(true)}
                 className={cn(
                   "gap-1.5 px-2",
-                  selectedDelivery 
-                    ? "text-orange-400 hover:text-orange-300 hover:bg-orange-500/20" 
+                  selectedDelivery
+                    ? "text-orange-400 hover:text-orange-300 hover:bg-orange-500/20"
                     : "text-orange-400/70 hover:text-orange-300 hover:bg-orange-500/20"
                 )}
               >
@@ -941,14 +949,14 @@ const handlePaymentComplete = async (payments: { method: string; amount: number 
               </Button>
 
               {/* Sales Rep */}
-              <Button 
-                variant="ghost" 
-                size="sm" 
+              <Button
+                variant="ghost"
+                size="sm"
                 onClick={() => setShowSalesRepSelector(true)}
                 className={cn(
                   "gap-1.5 px-2",
-                  selectedSalesRep 
-                    ? "text-emerald-400 hover:text-emerald-300 hover:bg-emerald-500/20" 
+                  selectedSalesRep
+                    ? "text-emerald-400 hover:text-emerald-300 hover:bg-emerald-500/20"
                     : "text-emerald-400/70 hover:text-emerald-300 hover:bg-emerald-500/20"
                 )}
               >
@@ -960,9 +968,9 @@ const handlePaymentComplete = async (payments: { method: string; amount: number 
               </Button>
 
               {/* Returns */}
-              <Button 
-                variant="ghost" 
-                size="sm" 
+              <Button
+                variant="ghost"
+                size="sm"
                 onClick={() => setShowReturns(true)}
                 className="text-rose-400 hover:text-rose-300 hover:bg-rose-500/20 gap-1.5 px-2"
               >
@@ -971,14 +979,14 @@ const handlePaymentComplete = async (payments: { method: string; amount: number 
               </Button>
 
               {/* Shift */}
-              <Button 
-                variant="ghost" 
-                size="sm" 
+              <Button
+                variant="ghost"
+                size="sm"
                 onClick={() => setShowShiftPanel(true)}
                 className={cn(
                   "gap-1.5 px-2",
-                  currentShift 
-                    ? "text-violet-400 hover:text-violet-300 hover:bg-violet-500/20" 
+                  currentShift
+                    ? "text-violet-400 hover:text-violet-300 hover:bg-violet-500/20"
                     : "text-violet-400/70 hover:text-violet-300 hover:bg-violet-500/20"
                 )}
               >
@@ -1072,9 +1080,9 @@ const handlePaymentComplete = async (payments: { method: string; amount: number 
             {/* Logout */}
             <Tooltip>
               <TooltipTrigger asChild>
-                <Button 
-                  variant="ghost" 
-                  size="sm" 
+                <Button
+                  variant="ghost"
+                  size="sm"
                   onClick={handleLogout}
                   className="text-white/80 hover:text-white hover:bg-white/10"
                 >
@@ -1111,7 +1119,7 @@ const handlePaymentComplete = async (payments: { method: string; amount: number 
                   />
                   <Barcode className="absolute end-3 top-1/2 -translate-y-1/2 text-muted-foreground" size={20} />
                 </div>
-                
+
                 {searchQuery.length >= 3 && (
                   <Button
                     type="button"
@@ -1125,14 +1133,14 @@ const handlePaymentComplete = async (payments: { method: string; amount: number 
                   </Button>
                 )}
               </div>
-              
+
               {isBarcodeScanning && (
                 <div className="flex items-center gap-1 text-xs text-green-500">
                   <Loader2 size={12} className="animate-spin" />
                   <span>{language === 'ar' ? 'جاري معالجة الباركود...' : 'Processing barcode...'}</span>
                 </div>
               )}
-              
+
               {categoriesOffline && (
                 <div className="flex items-center gap-1 text-xs text-amber-500">
                   <WifiOff size={12} />
@@ -1274,23 +1282,23 @@ const handlePaymentComplete = async (payments: { method: string; amount: number 
           subtotal={calculateSubtotalAfterAllDiscounts()}
           tax={calculateTax()}
           cartItems={cartItems}
-        onComplete={(payments, invoiceNum) => {
-    console.log('📄 Invoice Number from modal:', invoiceNum);
-    handlePaymentComplete(payments, invoiceNum);
-  }}
-          customer={selectedCustomer ? { 
-            id: selectedCustomer.id, 
-            name: selectedCustomer.name, 
-            loyalty_points: selectedCustomer.loyalty_points 
+          onComplete={(payments, invoiceNum) => {
+            console.log('📄 Invoice Number from modal:', invoiceNum);
+            handlePaymentComplete(payments, invoiceNum);
+          }}
+          customer={selectedCustomer ? {
+            id: selectedCustomer.id,
+            name: selectedCustomer.name,
+            loyalty_points: selectedCustomer.loyalty_points
           } : null}
-          deliveryPerson={selectedDelivery ? { 
-            id: selectedDelivery.id, 
-            name: selectedDelivery.name 
+          deliveryPerson={selectedDelivery ? {
+            id: selectedDelivery.id,
+            name: selectedDelivery.name
           } : null}
-          salesRepresentative={selectedSalesRep ? { 
-            id: selectedSalesRep.id, 
+          salesRepresentative={selectedSalesRep ? {
+            id: selectedSalesRep.id,
             name: selectedSalesRep.name,
-            commission_rate: selectedSalesRep.commission_rate 
+            commission_rate: selectedSalesRep.commission_rate
           } : null}
           shiftId={currentShift?.id || null}
           branchId={branchData?.id || null}
@@ -1333,6 +1341,7 @@ const handlePaymentComplete = async (payments: { method: string; amount: number 
               setSelectedProductForVariant(null);
             }}
             product={selectedProductForVariant}
+            warehouseId={selectedWarehouseId}
             onSelectVariant={addVariantToCart}
           />
         )}

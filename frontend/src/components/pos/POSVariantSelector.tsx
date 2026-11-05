@@ -1,12 +1,33 @@
 import React, { useState, useMemo } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import api from '@/lib/api';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useRegionalSettings } from '@/contexts/RegionalSettingsContext';
 import { cn } from '@/lib/utils';
-import { X, Check, ShoppingCart, Minus, Plus } from 'lucide-react';
+import { X, Check, ShoppingCart } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { getProductColors, getProductSizes, getAvailableVariants } from '@/hooks/usePOSData';
+
+interface ColorItem {
+  id: number;
+  color_id: number;
+  color: string;
+  stock: number;
+  hex_code?: string | null;
+  // ✅ رصيد المخزن المحدد
+  warehouse_stock?: number | null;
+  warehouseStocks?: Array<{ warehouse_id: number; stock: number }>;
+}
+
+interface UnitItem {
+  id: number;
+  unit_id: number;
+  unit_name: string;
+  sell_price: string;
+  barcode: string;
+  colors: ColorItem[];
+}
 
 // تعريف الـ Product من usePOSData
 interface Product {
@@ -22,37 +43,15 @@ interface Product {
     fullUrl?: string;
     previewUrl?: string;
   };
-  units?: Array<{
-    id: number;
-    unit_id: number;
-    unit_name: string;
-    sell_price: string;
-    barcode: string;
-    colors: Array<{
-      id: number;
-      color_id: number;
-      color: string;
-      stock: number;
-      hex_code?: string; // ✅ أضفنا hex_code هنا
-    }>;
-  }>;
-}
-
-interface SelectedVariant {
-  unitId: number;
-  colorId: number;
-  sizeName: string;
-  colorName: string;
-  price: number;
-  stock: number;
-  sku: string;
-  quantity: number;
+  units?: UnitItem[];
 }
 
 interface POSVariantSelectorProps {
   isOpen: boolean;
   onClose: () => void;
   product: Product;
+  /** ✅ المخزن المختار في الكاشير */
+  warehouseId?: number | string | null;
   onSelectVariant: (variant: {
     productId: string;
     unitId: number;
@@ -65,73 +64,137 @@ interface POSVariantSelectorProps {
   }) => void;
 }
 
+// ✅ الرصيد الفعلي للون
+// الأفضل تنقله لـ '@/lib/stock' وتستخدمه في كل الملفات
+const getEffectiveColorStock = (
+  color: ColorItem,
+  warehouseId?: number | string | null,
+): number => {
+  const hasWarehouse =
+    warehouseId != null && warehouseId !== '' && warehouseId !== 'all';
+  const hasBreakdown =
+    Array.isArray(color.warehouseStocks) && color.warehouseStocks.length > 0;
+
+  if (hasWarehouse) {
+    // 1) تفصيل المخازن للمخزن المحدد
+    if (hasBreakdown) {
+      const wid = Number(warehouseId);
+      const hit = color.warehouseStocks!.find((w) => Number(w.warehouse_id) === wid);
+      return hit ? Number(hit.stock) || 0 : 0;
+    }
+    // 2) warehouse_stock
+    if (color.warehouse_stock != null) {
+      const n = Number(color.warehouse_stock);
+      if (!Number.isNaN(n)) return n;
+    }
+  }
+
+  // 3) مجموع المخازن لو التفصيل موجود
+  if (hasBreakdown) {
+    return color.warehouseStocks!.reduce((s, w) => s + (Number(w.stock) || 0), 0);
+  }
+
+  // 4) الإجمالي
+  return Number(color.stock) || 0;
+};
+
 const POSVariantSelector: React.FC<POSVariantSelectorProps> = ({
   isOpen,
   onClose,
   product,
-  onSelectVariant
+  warehouseId,
+  onSelectVariant,
 }) => {
   const { language } = useLanguage();
   const { formatCurrency } = useRegionalSettings();
-  const [selectedVariants, setSelectedVariants] = useState<SelectedVariant[]>([]);
   const [selectedSize, setSelectedSize] = useState<string>('');
   const [selectedColor, setSelectedColor] = useState<string>('');
 
+  const hasWarehouse =
+    warehouseId != null && warehouseId !== '' && warehouseId !== 'all';
+
+  // ✅ جيب المنتج بالمخزن المختار عشان أرصدة الألوان تبقى بتاعة المخزن ده
+  const { data: productDetails } = useQuery({
+    queryKey: ['pos-variant-selector', product?.id, warehouseId],
+    queryFn: async () => {
+      const response = await api.get(
+        `/product/${product.id}?warehouse_id=${Number(warehouseId)}`,
+      );
+      return response.data.data;
+    },
+    enabled: isOpen && !!product?.id && hasWarehouse,
+  });
+
+  // ✅ الوحدات: من الـ API (بالمخزن) أو من المنتج الأصلي
+  const units: UnitItem[] = useMemo(
+    () => (productDetails?.units || product.units || []) as UnitItem[],
+    [productDetails?.units, product.units],
+  );
+
+  // ✅ رصيد المنتج الأساسي (للوحدات بدون ألوان)
+  const baseStock = Number(productDetails?.stock ?? product.stock) || 0;
+
   // استخراج المقاسات والألوان المتاحة
-  const availableSizes = useMemo(() => {
-    if (!product.units) return [];
-    return product.units.map(unit => ({
-      id: unit.unit_id,
-      name: unit.unit_name,
-      label: unit.unit_name
-    }));
-  }, [product.units]);
+  const availableSizes = useMemo(
+    () =>
+      units.map((unit) => ({
+        id: unit.unit_id,
+        name: unit.unit_name,
+        label: unit.unit_name,
+      })),
+    [units],
+  );
 
   const availableColors = useMemo(() => {
-    if (!product.units || !selectedSize) return [];
-    
-    const unit = product.units.find(u => u.unit_name === selectedSize);
+    if (!selectedSize) return [];
+
+    const unit = units.find((u) => u.unit_name === selectedSize);
     if (!unit) return [];
-    
-    return unit.colors.map(color => ({
+
+    return unit.colors.map((color) => ({
       id: color.color_id,
       name: color.color,
-      stock: color.stock,
-      hexCode: color.hex_code || getColorHex(color.color) // ✅ استخدم hex_code من API
+      stock: getEffectiveColorStock(color, warehouseId), // ✅ الرصيد الفعلي
+      hexCode: color.hex_code || getColorHex(color.color),
     }));
-  }, [product.units, selectedSize]);
+  }, [units, selectedSize, warehouseId]);
 
   // ✅ الحصول على تفاصيل الـ variant المحدد (مع أو بدون لون)
   const selectedVariantDetails = useMemo(() => {
-    if (!selectedSize || !product.units) return null;
-    
-    const unit = product.units.find(u => u.unit_name === selectedSize);
+    if (!selectedSize) return null;
+
+    const unit = units.find((u) => u.unit_name === selectedSize);
     if (!unit) return null;
-    
-    // Products with tracked colors require choosing the exact color.
+
+    // المنتجات اللي ليها ألوان لازم تختار اللون
     if (!selectedColor) {
       if (unit.colors.length > 0) return null;
       return {
         unitId: unit.unit_id,
         colorId: 0,
         price: parseFloat(unit.sell_price || '0'),
-        stock: Number(product.stock) || 0,
-        sku: unit.barcode || product.sku
+        stock: baseStock,
+        sku: unit.barcode || product.sku,
       };
     }
-    
-    // ✅ لو مختار لون محدد
-    const color = unit.colors.find(c => c.color === selectedColor);
+
+    const color = unit.colors.find((c) => c.color === selectedColor);
     if (!color) return null;
-    
+
     return {
       unitId: unit.unit_id,
       colorId: color.color_id,
       price: parseFloat(unit.sell_price || '0'),
-      stock: color.stock,
-      sku: unit.barcode || product.sku
+      stock: getEffectiveColorStock(color, warehouseId), // ✅ الرصيد الفعلي
+      sku: unit.barcode || product.sku,
     };
-  }, [product, selectedSize, selectedColor]);
+  }, [units, product.sku, baseStock, selectedSize, selectedColor, warehouseId]);
+
+  const handleClose = () => {
+    onClose();
+    setSelectedSize('');
+    setSelectedColor('');
+  };
 
   const handleAddToCart = () => {
     if (selectedVariantDetails) {
@@ -143,56 +206,35 @@ const POSVariantSelector: React.FC<POSVariantSelectorProps> = ({
         color: selectedColor || '',
         price: selectedVariantDetails.price,
         sku: selectedVariantDetails.sku,
-        stock: selectedVariantDetails.stock
+        stock: selectedVariantDetails.stock,
       });
     }
     handleClose();
-  };
-
-  const handleClose = () => {
-    onClose();
-    setSelectedSize('');
-    setSelectedColor('');
-    setSelectedVariants([]);
   };
 
   if (!isOpen) return null;
 
   const t = {
     en: {
-      selectVariants: 'Select Variants',
       size: 'Size',
       colors: 'Colors',
       addToCart: 'Add to Cart',
-      items: 'items',
-      total: 'Total',
-      selectedItems: 'Selected Items',
-      noSelection: 'Select size',
       tapToSelect: 'Choose size',
       noVariants: 'No variants available',
       noVariantsDesc: 'This product has no configured variants.',
-      outOfStock: 'Out of Stock',
-      optional: 'Optional'
     },
     ar: {
-      selectVariants: 'اختر المتغيرات',
       size: 'المقاس',
       colors: 'الألوان',
       addToCart: 'إضافة للسلة',
-      items: 'عناصر',
-      total: 'المجموع',
-      selectedItems: 'العناصر المحددة',
-      noSelection: 'اختر المقاس',
       tapToSelect: 'اختر المقاس',
       noVariants: 'لا توجد متغيرات متاحة',
       noVariantsDesc: 'هذا المنتج ليس له متغيرات',
-      outOfStock: 'غير متوفر',
-      optional: 'اختياري'
-    }
+    },
   }[language];
 
   // إذا مافيش units
-  if (!product.units || product.units.length === 0) {
+  if (units.length === 0) {
     return (
       <div className="fixed inset-0 z-50 flex items-center justify-center">
         <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={handleClose} />
@@ -212,20 +254,20 @@ const POSVariantSelector: React.FC<POSVariantSelectorProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
-      <div 
+      <div
         className="absolute inset-0 bg-black/50 backdrop-blur-sm"
         onClick={handleClose}
       />
-      
+
       <div className="relative w-full max-w-2xl mx-4 bg-card rounded-2xl shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200 max-h-[90vh] flex flex-col">
         {/* Header */}
         <div className="flex items-center justify-between p-4 border-b border-border bg-muted/30 flex-shrink-0">
           <div className="flex items-center gap-3">
             <div className="w-12 h-12 bg-muted rounded-lg flex items-center justify-center overflow-hidden">
               {product.image?.fullUrl || product.imageUrl || product.image_url ? (
-                <img 
-                  src={product.image?.fullUrl || product.imageUrl || product.image_url || ''} 
-                  alt={product.name} 
+                <img
+                  src={product.image?.fullUrl || product.imageUrl || product.image_url || ''}
+                  alt={product.name}
                   className="w-full h-full object-cover"
                   onError={(e) => {
                     e.currentTarget.style.display = 'none';
@@ -267,32 +309,32 @@ const POSVariantSelector: React.FC<POSVariantSelectorProps> = ({
                   key={size.id}
                   onClick={() => {
                     setSelectedSize(size.name);
-                    setSelectedColor(''); // ✅ مسح اللون المحدد عند تغيير المقاس
+                    setSelectedColor(''); // مسح اللون عند تغيير المقاس
                   }}
                   className={cn(
                     'p-3 rounded-lg border-2 transition-all text-center',
                     selectedSize === size.name
                       ? 'border-primary bg-primary/10'
-                      : 'border-border hover:border-primary/50'
+                      : 'border-border hover:border-primary/50',
                   )}
                 >
-                  <span className="font-medium text-sm">
-                    {size.label}
-                  </span>
+                  <span className="font-medium text-sm">{size.label}</span>
                 </button>
               ))}
             </div>
           </div>
 
-          {/* Color Selection - required for products that track colors */}
+          {/* Color Selection - مطلوب للمنتجات اللي ليها ألوان */}
           {selectedSize && availableColors.length > 0 && (
             <div className="mb-6">
               <h3 className="text-sm font-semibold mb-3 flex items-center gap-2">
                 <span className="w-1.5 h-5 bg-primary rounded-full" />
-                {t.colors} <span className="text-xs text-destructive">({language === 'ar' ? 'مطلوب' : 'Required'})</span>
+                {t.colors}{' '}
+                <span className="text-xs text-destructive">
+                  ({language === 'ar' ? 'مطلوب' : 'Required'})
+                </span>
               </h3>
 
-              {/* ألوان المنتج */}
               <div className="grid grid-cols-4 sm:grid-cols-5 md:grid-cols-6 gap-3">
                 {availableColors.map((color) => (
                   <button
@@ -304,15 +346,15 @@ const POSVariantSelector: React.FC<POSVariantSelectorProps> = ({
                       selectedColor === color.name
                         ? 'ring-2 ring-primary ring-offset-2'
                         : 'hover:ring-1 hover:ring-primary/50',
-                      color.stock === 0 && 'opacity-50 cursor-not-allowed'
+                      color.stock === 0 && 'opacity-50 cursor-not-allowed',
                     )}
                   >
-                    <div 
+                    <div
                       className={cn(
-                        "w-10 h-10 rounded-full border-2 flex items-center justify-center",
-                        selectedColor === color.name ? 'border-primary' : 'border-border'
+                        'w-10 h-10 rounded-full border-2 flex items-center justify-center',
+                        selectedColor === color.name ? 'border-primary' : 'border-border',
                       )}
-                      style={{ backgroundColor: color.hexCode }} // ✅ استخدم hexCode الحقيقي
+                      style={{ backgroundColor: color.hexCode }}
                     >
                       {selectedColor === color.name && (
                         <Check size={16} className="text-white drop-shadow-md" />
@@ -368,7 +410,7 @@ const POSVariantSelector: React.FC<POSVariantSelectorProps> = ({
         {/* Footer */}
         <div className="p-4 border-t border-border bg-background flex-shrink-0">
           {selectedSize ? (
-            <Button 
+            <Button
               onClick={handleAddToCart}
               disabled={!selectedVariantDetails}
               className="w-full h-12 text-base gap-2"
@@ -382,9 +424,7 @@ const POSVariantSelector: React.FC<POSVariantSelectorProps> = ({
               )}
             </Button>
           ) : (
-            <p className="text-center text-sm text-muted-foreground">
-              {t.tapToSelect}
-            </p>
+            <p className="text-center text-sm text-muted-foreground">{t.tapToSelect}</p>
           )}
         </div>
       </div>
@@ -395,20 +435,20 @@ const POSVariantSelector: React.FC<POSVariantSelectorProps> = ({
 // دالة مساعدة للـ fallback (لو hex_code مش موجود)
 function getColorHex(colorName: string): string {
   const colorMap: Record<string, string> = {
-    'أسود': '#000000',
-    'أبيض': '#FFFFFF',
-    'أحمر': '#FF0000',
-    'أخضر': '#00FF00',
-    'أزرق': '#0000FF',
-    'أصفر': '#FFFF00',
-    'بنفسجي': '#800080',
-    'وردي': '#FFC0CB',
-    'رمادي': '#808080',
-    'بني': '#8B4513',
-    'برتقالي': '#FFA500',
-    'name': '#666666'
+    أسود: '#000000',
+    أبيض: '#FFFFFF',
+    أحمر: '#FF0000',
+    أخضر: '#00FF00',
+    أزرق: '#0000FF',
+    أصفر: '#FFFF00',
+    بنفسجي: '#800080',
+    وردي: '#FFC0CB',
+    رمادي: '#808080',
+    بني: '#8B4513',
+    برتقالي: '#FFA500',
+    name: '#666666',
   };
-  
+
   return colorMap[colorName] || '#CCCCCC';
 }
 
