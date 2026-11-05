@@ -13,7 +13,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { ScrollArea, ScrollBar } from '@/components/ui/scroll-area';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import { cn, formatDate } from '@/lib/utils';
 import api from '@/lib/api';
 import { useInventory } from '@/hooks/useInventory';
@@ -21,10 +21,10 @@ import { useReactToPrint } from 'react-to-print';
 import * as XLSX from 'xlsx';
 import { saveAs } from 'file-saver';
 import InventoryPrintTemplate from '@/components/inventory/InventoryPrintTemplate';
-import type { 
-  Warehouse, 
-  Product, 
-  WarehouseProduct, 
+import type {
+  Warehouse,
+  Product,
+  WarehouseProduct,
   InventoryRecord,
   CountedProduct,
   ProductUnit,
@@ -36,13 +36,10 @@ import {
   Plus,
   Search,
   CheckCircle,
-  XCircle,
-  Clock,
   Eye,
   Save,
   Warehouse as WarehouseIcon,
   Package,
-  AlertTriangle,
   TrendingDown,
   TrendingUp,
   Filter,
@@ -57,50 +54,60 @@ import { toast } from '@/hooks/use-toast';
 
 // ========== Helper Functions ==========
 
-// دالة لتحويل بيانات المنتج إلى صفوف مسطحة (كل لون + مقاس كصف منفصل)
-const flattenProductColors = (product: WarehouseProduct): CountedProduct[] => {
+const getWarehouseStock = (color: any, warehouseId: string | number): number => {
+  const ws = color.warehouseStocks?.find(
+    (w: any) => Number(w.warehouse_id) === Number(warehouseId)
+  );
+  if (ws) return Number(ws.stock) || 0;
+  return Number(color.warehouse_stock) || 0;
+};
+
+const flattenProductColors = (
+  product: WarehouseProduct,
+  warehouseId: string | number
+): CountedProduct[] => {
   const flattened: CountedProduct[] = [];
-  
+
   if (!product.units || product.units.length === 0) {
-    // إذا لم يكن هناك وحدات، أضف المنتج كما هو
     return [{
       product_id: product.id,
       unit_id: null,
+      product_unit_id: null,
       color_id: null,
       counted_stock: 0,
-      system_stock: product.stock || 0,
+      system_stock: Number(product.stock) || 0,
       product_name: product.name,
       unit_name: null,
       color: null,
       color_hex: null,
       sku: product.sku,
       barcode: (product as any).barcode
-    }];
+    } as CountedProduct];
   }
-  
-  // مرور على كل الوحدات والألوان
+
   product.units.forEach((unit: ProductUnit) => {
     if (unit.colors && unit.colors.length > 0) {
       unit.colors.forEach((color: UnitColor) => {
         flattened.push({
           product_id: product.id,
           unit_id: unit.unit_id,
+          product_unit_id: unit.id,
           color_id: color.color_id,
           counted_stock: 0,
-          system_stock: color.stock,
+          system_stock: getWarehouseStock(color, warehouseId),
           product_name: product.name,
           unit_name: unit.unit_name,
           color: color.color,
           color_hex: color.hex_code,
           sku: product.sku,
-      barcode: (product as any).barcode
-        });
+          barcode: (unit as any).barcode || (product as any).barcode
+        } as CountedProduct);
       });
     } else {
-      // إذا لم يكن هناك ألوان في الوحدة
       flattened.push({
         product_id: product.id,
         unit_id: unit.unit_id,
+        product_unit_id: unit.id,
         color_id: null,
         counted_stock: 0,
         system_stock: 0,
@@ -109,15 +116,14 @@ const flattenProductColors = (product: WarehouseProduct): CountedProduct[] => {
         color: null,
         color_hex: null,
         sku: product.sku,
-      barcode: (product as any).barcode
-      });
+        barcode: (unit as any).barcode || (product as any).barcode
+      } as CountedProduct);
     }
   });
-  
+
   return flattened;
 };
 
-// دالة لإنشاء مفتاح فريد للمنتج
 const getProductUniqueKey = (product: CountedProduct): string => {
   return `${product.product_id}_${product.unit_id || ''}_${product.color_id || ''}`;
 };
@@ -126,12 +132,10 @@ const getProductUniqueKey = (product: CountedProduct): string => {
 const InventoryCount = () => {
   const { language } = useLanguage();
   const { user } = useAuth();
-  const { useGetAll, useGetById, useCreate, useUpdate, useUpdateNote } = useInventory();
+  const { useGetAll, useGetById, useCreate, useUpdate } = useInventory();
 
   // ========== State ==========
   const [newCountOpen, setNewCountOpen] = useState(false);
-  const [viewCountOpen, setViewCountOpen] = useState(false);
-  const [selectedCount, setSelectedCount] = useState<any>(null);
   const [selectedWarehouse, setSelectedWarehouse] = useState('');
   const [countNotes, setCountNotes] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
@@ -146,15 +150,28 @@ const InventoryCount = () => {
   const [productFilter, setProductFilter] = useState<string>('all');
   const [dateFrom, setDateFrom] = useState<string>('');
   const [dateTo, setDateTo] = useState<string>('');
-  
+
+  // ✅ NEW: وضع العرض فقط
+  const [isViewMode, setIsViewMode] = useState(false);
+
+  // State لتعديل الـ variants (فقط لما المستخدم يعدّل)
+  const [editVariants, setEditVariants] = useState<Array<{
+    product_unit_id: number;
+    unit_id: number;
+    unit_name: string;
+    color_id: number;
+    color_name: string;
+    color_code: string;
+    counted_stock: number;
+    original_stock: number;
+  }>>([]);
+
   // State للطباعة
   const printRef = useRef<HTMLDivElement>(null);
   const [showPrint, setShowPrint] = useState(false);
   const [printData, setPrintData] = useState<any>(null);
 
   // ========== Queries ==========
-
-  // جلب المخازن
   const { data: warehouses = [] } = useQuery({
     queryKey: ['warehouses'],
     queryFn: async () => {
@@ -169,8 +186,7 @@ const InventoryCount = () => {
     }
   });
 
-  // جلب منتجات المخزن
-  const { data: warehouseProducts = [], refetch: refetchProducts } = useQuery({
+  const { data: warehouseProducts = [] } = useQuery({
     queryKey: ['warehouse-products', selectedWarehouse],
     queryFn: async () => {
       if (!selectedWarehouse) return [];
@@ -180,7 +196,6 @@ const InventoryCount = () => {
     enabled: !!selectedWarehouse && newCountOpen
   });
 
-  // جلب جميع المنتجات للفلتر
   const { data: allProducts = [] } = useQuery({
     queryKey: ['all-products'],
     queryFn: async () => {
@@ -195,7 +210,6 @@ const InventoryCount = () => {
     }
   });
 
-  // جلب سجلات الجرد
   const { data: inventoryRecords = [], isLoading: recordsLoading, refetch: refetchRecords } = useGetAll({
     warehouse_id: warehouseFilter !== 'all' ? parseInt(warehouseFilter) : undefined,
     product_id: productFilter !== 'all' ? parseInt(productFilter) : undefined,
@@ -203,14 +217,60 @@ const InventoryCount = () => {
     date_to: dateTo || undefined
   });
 
-  // جلب تفاصيل السجل للتعديل
   const { data: inventoryDetails, isLoading: detailsLoading } = useGetById(selectedRecord?.id || null, editRecordOpen);
 
   // ========== Mutations ==========
   const createMutation = useCreate();
   const updateMutation = useUpdate();
-  const updateNoteMutation = useUpdateNote();
-  const queryClient = useQueryClient();
+
+  // ========== Initial Variants (sync via useMemo) ==========
+  const initialEditVariants = useMemo(() => {
+    const d: any = inventoryDetails;
+    if (!d) return [];
+
+    const candidates = [
+      d?.product?.units,
+      d?.data?.product?.units,
+      d?.data?.data?.product?.units,
+      d?.units,
+      d?.data?.units,
+    ];
+
+    const units = candidates.find((c) => Array.isArray(c) && c.length > 0) ?? [];
+    if (units.length === 0) return [];
+
+    const flat: Array<{
+      product_unit_id: number;
+      unit_id: number;
+      unit_name: string;
+      color_id: number;
+      color_name: string;
+      color_code: string;
+      counted_stock: number;
+      original_stock: number;
+    }> = [];
+
+    units.forEach((unit: any) => {
+      if (Array.isArray(unit.colors)) {
+        unit.colors.forEach((color: any) => {
+          flat.push({
+            product_unit_id: Number(unit.id) || 0,
+            unit_id: Number(unit.unit_id) || 0,
+            unit_name: unit.unit_name || '-',
+            color_id: Number(color.color_id) || 0,
+            color_name: color.color || '-',
+            color_code: color.hex_code || '#ccc',
+            counted_stock: Number(color.warehouse_stock) || 0,
+            original_stock: Number(color.warehouse_stock) || 0,
+          });
+        });
+      }
+    });
+
+    return flat;
+  }, [inventoryDetails]);
+
+  const displayVariants = editVariants.length > 0 ? editVariants : initialEditVariants;
 
   // ========== Company Info ==========
   const companyInfo = {
@@ -287,6 +347,8 @@ const InventoryCount = () => {
       viewDetails: 'View Details',
       close: 'Close',
       editInventory: 'Edit Inventory',
+      viewInventory: 'View Inventory',
+      readOnly: 'Read Only',
       updateActualStock: 'Update Actual Stock',
       willUpdateStock: 'This will update the product stock to match the counted quantity',
       saveChanges: 'Save Changes',
@@ -363,6 +425,8 @@ const InventoryCount = () => {
       viewDetails: 'عرض التفاصيل',
       close: 'إغلاق',
       editInventory: 'تعديل الجرد',
+      viewInventory: 'عرض الجرد',
+      readOnly: 'للعرض فقط',
       updateActualStock: 'تحديث المخزون الفعلي',
       willUpdateStock: 'سيتم تحديث مخزون المنتج في النظام ليتطابق مع الكمية المعدودة',
       saveChanges: 'حفظ التغييرات',
@@ -381,74 +445,57 @@ const InventoryCount = () => {
   }[language];
 
   // ========== Helper Functions ==========
-
   const getStatusBadge = (record: InventoryRecord) => {
     const diff = record.difference;
     if (diff > 0) {
       return (
         <Badge variant="outline" className="gap-1 bg-green-100 text-green-700 border-green-200">
-          <TrendingUp size={12} />
-          +{diff} ({t.positiveVariance})
+          <TrendingUp size={12} />+{diff} ({t.positiveVariance})
         </Badge>
       );
     }
     if (diff < 0) {
       return (
         <Badge variant="outline" className="gap-1 bg-red-100 text-red-700 border-red-200">
-          <TrendingDown size={12} />
-          {diff} ({t.negativeVariance})
+          <TrendingDown size={12} />{diff} ({t.negativeVariance})
         </Badge>
       );
     }
     return (
       <Badge variant="outline" className="gap-1 bg-gray-100 text-gray-700 border-gray-200">
-        <CheckCircle size={12} />
-        {t.zeroVariance}
+        <CheckCircle size={12} />{t.zeroVariance}
       </Badge>
     );
   };
 
-  // دالة لإضافة منتج للجرد
   const handleAddProductToCount = (item: CountedProduct, countedStock: number) => {
     if (countedStock < 0) {
       toast({ title: t.error, description: 'الكمية يجب أن تكون 0 أو أكثر', variant: 'destructive' });
       return;
     }
-    
+
     const uniqueKey = getProductUniqueKey(item);
-    
+
     setCountedProducts(prev => {
       const existingIndex = prev.findIndex(p => getProductUniqueKey(p) === uniqueKey);
-      
+
       if (existingIndex !== -1) {
-        // تحديث الموجود
         const updated = [...prev];
-        updated[existingIndex] = {
-          ...updated[existingIndex],
-          counted_stock: countedStock
-        };
+        updated[existingIndex] = { ...updated[existingIndex], counted_stock: countedStock };
         return updated;
       }
-      
-      // إضافة جديد
-      return [...prev, {
-        ...item,
-        uniqueKey,
-        counted_stock: countedStock
-      }];
+
+      return [...prev, { ...item, uniqueKey, counted_stock: countedStock }];
     });
   };
 
-  // دالة لحذف منتج من الجرد
   const handleRemoveProductFromCount = (productId: number, unitId?: number | null, colorId?: number | null) => {
-    setCountedProducts(prev => prev.filter(p => 
+    setCountedProducts(prev => prev.filter(p =>
       !(p.product_id === productId && p.unit_id === unitId && p.color_id === colorId)
     ));
   };
 
-  const handleClearAllProducts = () => {
-    setCountedProducts([]);
-  };
+  const handleClearAllProducts = () => setCountedProducts([]);
 
   const handleResetFilters = () => {
     setWarehouseFilter('all');
@@ -458,29 +505,55 @@ const InventoryCount = () => {
     setFilterValues({});
   };
 
-  const handleEditRecord = (record: InventoryRecord) => {
+  // ✅ NEW: افتح السجل في وضع العرض أو التعديل
+  const handleOpenRecord = (record: InventoryRecord, viewOnly: boolean = false) => {
     setSelectedRecord(record);
     setEditCountedStock(record.counted_stock);
     setEditNote(record.note || '');
     setUpdateStock(false);
+    setEditVariants([]);
+    setIsViewMode(viewOnly);
     setEditRecordOpen(true);
   };
 
   const handleSaveEdit = () => {
-    if (!selectedRecord) return;
+    if (!selectedRecord || isViewMode) return;
+
+    // لو المنتج عنده ألوان → ابعت variants
+    if (displayVariants.length > 0) {
+      updateMutation.mutate({
+        id: selectedRecord.id,
+        data: {
+          variants: displayVariants.map(v => ({
+            product_unit_id: v.product_unit_id,
+            color_id: v.color_id,
+            counted_stock: v.counted_stock,
+          })),
+          note: editNote,
+        } as any,
+      }, {
+        onSuccess: () => {
+          setEditRecordOpen(false);
+          setSelectedRecord(null);
+          setEditVariants([]);
+          setIsViewMode(false);
+          refetchRecords();
+        },
+      });
+      return;
+    }
+
+    // منتج بدون ألوان → counted_stock
     updateMutation.mutate({
       id: selectedRecord.id,
-      data: {
-        counted_stock: editCountedStock,
-        note: editNote,
-        update_stock: updateStock
-      }
+      data: { counted_stock: editCountedStock, note: editNote },
     }, {
       onSuccess: () => {
         setEditRecordOpen(false);
         setSelectedRecord(null);
+        setIsViewMode(false);
         refetchRecords();
-      }
+      },
     });
   };
 
@@ -493,18 +566,14 @@ const InventoryCount = () => {
   const isDifferent = difference !== 0;
 
   // ========== Flatten Products for Display ==========
-  
-  // تحويل المنتجات إلى صفوف مسطحة (كل لون + مقاس كصف)
   const flattenedProducts = useMemo(() => {
     if (!warehouseProducts.length) return [];
-    
+
     const flattened: CountedProduct[] = [];
     warehouseProducts.forEach((product: WarehouseProduct) => {
-      const productRows = flattenProductColors(product);
-      flattened.push(...productRows);
+      flattened.push(...flattenProductColors(product, selectedWarehouse));
     });
-    
-    // تطبيق البحث
+
     if (!searchQuery) return flattened;
     const query = searchQuery.toLowerCase();
     return flattened.filter((row: CountedProduct) =>
@@ -514,14 +583,13 @@ const InventoryCount = () => {
       row.unit_name?.toLowerCase().includes(query) ||
       row.color?.toLowerCase().includes(query)
     );
-  }, [warehouseProducts, searchQuery]);
+  }, [warehouseProducts, searchQuery, selectedWarehouse]);
 
-  // المنتجات المختارة للعرض في الملخص
   const selectedProductsSummary = useMemo(() => {
     return countedProducts.map(cp => {
-      const fullProduct = flattenedProducts.find(fp => 
-        fp.product_id === cp.product_id && 
-        fp.unit_id === cp.unit_id && 
+      const fullProduct = flattenedProducts.find(fp =>
+        fp.product_id === cp.product_id &&
+        fp.unit_id === cp.unit_id &&
         fp.color_id === cp.color_id
       );
       return {
@@ -534,7 +602,6 @@ const InventoryCount = () => {
     });
   }, [countedProducts, flattenedProducts]);
 
-  // فلتر سجلات الجرد
   const filteredInventoryRecords = useMemo(() => {
     let filtered = inventoryRecords || [];
     if (warehouseFilter !== 'all') {
@@ -547,22 +614,19 @@ const InventoryCount = () => {
   }, [inventoryRecords, warehouseFilter, productFilter]);
 
   // ========== Print & Export Functions ==========
-
   const preparePrintData = () => {
     const records = filteredInventoryRecords;
-    
     const totalSystemStock = records.reduce((sum, r) => sum + r.system_stock, 0);
     const totalCountedStock = records.reduce((sum, r) => sum + r.counted_stock, 0);
     const totalDifference = totalCountedStock - totalSystemStock;
-    
     const positiveVariance = records.filter(r => r.difference > 0).length;
     const negativeVariance = records.filter(r => r.difference < 0).length;
     const zeroVariance = records.filter(r => r.difference === 0).length;
-    
+
     return {
-      records: records,
-      warehouseName: warehouseFilter !== 'all' 
-        ? warehouses.find((w: Warehouse) => w.id === parseInt(warehouseFilter))?.name 
+      records,
+      warehouseName: warehouseFilter !== 'all'
+        ? warehouses.find((w: Warehouse) => w.id === parseInt(warehouseFilter))?.name
         : undefined,
       dateFrom: dateFrom || undefined,
       dateTo: dateTo || undefined,
@@ -580,9 +644,7 @@ const InventoryCount = () => {
   const handlePrint = useReactToPrint({
     contentRef: printRef,
     documentTitle: `inventory-count-report-${new Date().toISOString().split('T')[0]}`,
-    onAfterPrint: () => {
-      setShowPrint(false);
-    },
+    onAfterPrint: () => setShowPrint(false),
   });
 
   const handlePrintClick = () => {
@@ -594,18 +656,13 @@ const InventoryCount = () => {
       });
       return;
     }
-    
-    const data = preparePrintData();
-    setPrintData(data);
+    setPrintData(preparePrintData());
     setShowPrint(true);
-    setTimeout(() => {
-      handlePrint();
-    }, 100);
+    setTimeout(() => handlePrint(), 100);
   };
 
   const exportToExcel = () => {
     const records = filteredInventoryRecords;
-    
     if (records.length === 0) {
       toast({
         title: t.error,
@@ -614,8 +671,7 @@ const InventoryCount = () => {
       });
       return;
     }
-    
-    // تحويل البيانات إلى صيغة Excel
+
     const excelData = records.map((record, index) => ({
       '#': index + 1,
       [t.product]: language === 'ar' ? record.product.name_ar || record.product.name : record.product.name,
@@ -627,89 +683,48 @@ const InventoryCount = () => {
       [t.notes]: record.note || '',
       [t.date]: formatDate(record.created_at),
     }));
-    
-    // إضافة ملخص في النهاية
+
     const totalSystemStock = records.reduce((sum, r) => sum + r.system_stock, 0);
     const totalCountedStock = records.reduce((sum, r) => sum + r.counted_stock, 0);
     const totalDifference = totalCountedStock - totalSystemStock;
     const positiveVariance = records.filter(r => r.difference > 0).length;
     const negativeVariance = records.filter(r => r.difference < 0).length;
     const zeroVariance = records.filter(r => r.difference === 0).length;
-    
+
     excelData.push({
-      '#': '',
-      [t.product]: '=== ' + (language === 'ar' ? 'الملخص' : 'Summary') + ' ===',
-      [t.sku]: '',
-      [t.warehouse]: '',
-      [t.systemStock]: totalSystemStock,
-      [t.countedStock]: totalCountedStock,
-      [t.difference]: totalDifference,
-      [t.notes]: '',
-      [t.date]: '',
+      '#': '', [t.product]: '=== ' + (language === 'ar' ? 'الملخص' : 'Summary') + ' ===',
+      [t.sku]: '', [t.warehouse]: '', [t.systemStock]: totalSystemStock,
+      [t.countedStock]: totalCountedStock, [t.difference]: totalDifference,
+      [t.notes]: '', [t.date]: '',
     });
-    
     excelData.push({
-      '#': '',
-      [t.product]: t.positiveVariance,
-      [t.sku]: '',
-      [t.warehouse]: '',
-      [t.systemStock]: positiveVariance,
-      [t.countedStock]: '',
-      [t.difference]: '',
-      [t.notes]: '',
-      [t.date]: '',
+      '#': '', [t.product]: t.positiveVariance, [t.sku]: '', [t.warehouse]: '',
+      [t.systemStock]: positiveVariance, [t.countedStock]: '', [t.difference]: '',
+      [t.notes]: '', [t.date]: '',
     });
-    
     excelData.push({
-      '#': '',
-      [t.product]: t.negativeVariance,
-      [t.sku]: '',
-      [t.warehouse]: '',
-      [t.systemStock]: negativeVariance,
-      [t.countedStock]: '',
-      [t.difference]: '',
-      [t.notes]: '',
-      [t.date]: '',
+      '#': '', [t.product]: t.negativeVariance, [t.sku]: '', [t.warehouse]: '',
+      [t.systemStock]: negativeVariance, [t.countedStock]: '', [t.difference]: '',
+      [t.notes]: '', [t.date]: '',
     });
-    
     excelData.push({
-      '#': '',
-      [t.product]: t.zeroVariance,
-      [t.sku]: '',
-      [t.warehouse]: '',
-      [t.systemStock]: zeroVariance,
-      [t.countedStock]: '',
-      [t.difference]: '',
-      [t.notes]: '',
-      [t.date]: '',
+      '#': '', [t.product]: t.zeroVariance, [t.sku]: '', [t.warehouse]: '',
+      [t.systemStock]: zeroVariance, [t.countedStock]: '', [t.difference]: '',
+      [t.notes]: '', [t.date]: '',
     });
-    
-    // إنشاء ورقة عمل
+
     const worksheet = XLSX.utils.json_to_sheet(excelData);
-    
-    // ضبط عرض الأعمدة
-    const colWidths = [
-      { wch: 5 },   // #
-      { wch: 35 },  // Product
-      { wch: 15 },  // SKU
-      { wch: 20 },  // Warehouse
-      { wch: 15 },  // System Stock
-      { wch: 15 },  // Counted Stock
-      { wch: 15 },  // Difference
-      { wch: 30 },  // Notes
-      { wch: 15 },  // Date
+    worksheet['!cols'] = [
+      { wch: 5 }, { wch: 35 }, { wch: 15 }, { wch: 20 },
+      { wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 30 }, { wch: 15 }
     ];
-    worksheet['!cols'] = colWidths;
-    
-    // إنشاء المصنف وحفظه
+
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, 'Inventory Count');
-    
     const fileName = `inventory-count-${new Date().toISOString().split('T')[0]}.xlsx`;
     const excelBuffer = XLSX.write(workbook, { bookType: 'xlsx', type: 'array' });
-    const blob = new Blob([excelBuffer], { type: 'application/octet-stream' });
-    saveAs(blob, fileName);
-    
+    saveAs(new Blob([excelBuffer], { type: 'application/octet-stream' }), fileName);
+
     toast({
       title: t.success,
       description: language === 'ar' ? 'تم تصدير البيانات بنجاح' : 'Data exported successfully',
@@ -736,18 +751,15 @@ const InventoryCount = () => {
           {filteredInventoryRecords.length > 0 && (
             <>
               <Button variant="outline" onClick={handlePrintClick} className="gap-2">
-                <Printer size={16} />
-                {t.print}
+                <Printer size={16} />{t.print}
               </Button>
               <Button variant="outline" onClick={exportToExcel} className="gap-2">
-                <FileSpreadsheet size={16} />
-                {t.export}
+                <FileSpreadsheet size={16} />{t.export}
               </Button>
             </>
           )}
           <Button onClick={() => setNewCountOpen(true)} className="gap-2">
-            <Plus size={16} />
-            {t.newCount}
+            <Plus size={16} />{t.newCount}
           </Button>
         </div>
       </div>
@@ -756,8 +768,7 @@ const InventoryCount = () => {
       <Card>
         <CardHeader className="pb-3">
           <CardTitle className="text-base flex items-center gap-2">
-            <Filter size={16} />
-            {t.filter}
+            <Filter size={16} />{t.filter}
           </CardTitle>
         </CardHeader>
         <CardContent>
@@ -765,9 +776,7 @@ const InventoryCount = () => {
             <div className="space-y-2">
               <Label className="text-xs">{t.warehouse}</Label>
               <Select value={warehouseFilter} onValueChange={setWarehouseFilter}>
-                <SelectTrigger>
-                  <SelectValue placeholder={t.allWarehouses} />
-                </SelectTrigger>
+                <SelectTrigger><SelectValue placeholder={t.allWarehouses} /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">{t.allWarehouses}</SelectItem>
                   {warehouses.map((w: Warehouse) => (
@@ -784,9 +793,7 @@ const InventoryCount = () => {
             <div className="space-y-2">
               <Label className="text-xs">{t.product}</Label>
               <Select value={productFilter} onValueChange={setProductFilter}>
-                <SelectTrigger>
-                  <SelectValue placeholder={t.allProducts} />
-                </SelectTrigger>
+                <SelectTrigger><SelectValue placeholder={t.allProducts} /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">{t.allProducts}</SelectItem>
                   {allProducts.slice(0, 50).map((p: Product) => (
@@ -816,9 +823,7 @@ const InventoryCount = () => {
 
       {/* Inventory Records Table */}
       <Card>
-        <CardHeader className="border-b">
-          <CardTitle>{t.inventoryRecords}</CardTitle>
-        </CardHeader>
+        <CardHeader className="border-b"><CardTitle>{t.inventoryRecords}</CardTitle></CardHeader>
         <CardContent className="p-0">
           <ScrollArea className="h-[400px] w-full">
             <div className="min-w-[1000px]">
@@ -840,7 +845,9 @@ const InventoryCount = () => {
                   {isLoading ? (
                     <TableRow>
                       <TableCell colSpan={11} className="text-center py-8">
-                        <div className="flex justify-center"><div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin" /></div>
+                        <div className="flex justify-center">
+                          <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+                        </div>
                       </TableCell>
                     </TableRow>
                   ) : filteredInventoryRecords.length === 0 ? (
@@ -867,7 +874,6 @@ const InventoryCount = () => {
                             <p className="text-xs text-muted-foreground">{record.product?.sku}</p>
                           </div>
                         </TableCell>
-                       
                         <TableCell className="text-center font-medium">{record.system_stock}</TableCell>
                         <TableCell className="text-center font-medium">{record.counted_stock}</TableCell>
                         <TableCell className="text-center">{getStatusBadge(record)}</TableCell>
@@ -877,10 +883,24 @@ const InventoryCount = () => {
                         </TableCell>
                         <TableCell className="text-center">
                           <div className="flex items-center justify-center gap-1">
-                            <Button variant="ghost" size="sm" onClick={() => handleEditRecord(record)} className="h-8 w-8 p-0 text-blue-600" title={t.edit}>
+                            {/* ✅ زرار التعديل → edit mode */}
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => handleOpenRecord(record, false)}
+                              className="h-8 w-8 p-0 text-blue-600"
+                              title={t.edit}
+                            >
                               <Edit2 size={16} />
                             </Button>
-                            <Button variant="ghost" size="sm" className="h-8 w-8 p-0" title={t.view} onClick={() => handleEditRecord(record)}>
+                            {/* ✅ زرار العرض → view only mode */}
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-8 w-8 p-0"
+                              title={t.view}
+                              onClick={() => handleOpenRecord(record, true)}
+                            >
                               <Eye size={16} />
                             </Button>
                           </div>
@@ -896,32 +916,35 @@ const InventoryCount = () => {
         </CardContent>
       </Card>
 
-      {/* Edit Inventory Dialog */}
+      {/* Edit/View Inventory Dialog */}
       <Dialog open={editRecordOpen} onOpenChange={setEditRecordOpen}>
-        <DialogContent className="max-w-lg">
-          <DialogHeader>
+        <DialogContent className="max-w-2xl max-h-[90vh] flex flex-col p-0 overflow-hidden">
+          <DialogHeader className="p-4 border-b">
             <DialogTitle className="flex items-center gap-2">
-              <Edit2 size={18} />
-              {t.editInventory}
+              {isViewMode ? <Eye size={18} /> : <Edit2 size={18} />}
+              {isViewMode ? t.viewInventory : t.editInventory}
+              {isViewMode && (
+                <Badge variant="secondary" className="ms-2 text-xs">
+                  {t.readOnly}
+                </Badge>
+              )}
             </DialogTitle>
           </DialogHeader>
-          
+
           {detailsLoading ? (
-            <div className="flex justify-center py-8"><div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin" /></div>
+            <div className="flex justify-center py-12">
+              <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+            </div>
           ) : selectedRecord && inventoryDetails ? (
-            <div className="space-y-4 py-4">
+            <div className="flex-1 overflow-y-auto p-4 space-y-4">
+              {/* بيانات المنتج والمخزن */}
               <div className="grid grid-cols-2 gap-4 p-3 bg-muted/30 rounded-lg">
                 <div>
                   <p className="text-xs text-muted-foreground">{t.product}</p>
                   <p className="font-medium">
                     {language === 'ar' ? selectedRecord.product?.name_ar || selectedRecord.product?.name : selectedRecord.product?.name}
                   </p>
-                  {selectedRecord.unit_name && (
-                    <p className="text-xs text-muted-foreground mt-1">{t.unit}: {selectedRecord.unit_name}</p>
-                  )}
-                  {selectedRecord.color && (
-                    <p className="text-xs text-muted-foreground">{t.color}: {selectedRecord.color}</p>
-                  )}
+                  <p className="text-xs text-muted-foreground mt-1">{selectedRecord.product?.sku}</p>
                 </div>
                 <div>
                   <p className="text-xs text-muted-foreground">{t.warehouse}</p>
@@ -930,62 +953,140 @@ const InventoryCount = () => {
                   </p>
                 </div>
               </div>
-              
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label>{t.systemStock}</Label>
-                  <div className="p-3 bg-gray-100 dark:bg-gray-800 rounded-lg text-center">
-                    <span className="text-2xl font-bold">{selectedRecord.system_stock}</span>
+
+              {/* إجماليات الجرد */}
+              <div className="grid grid-cols-3 gap-2">
+                <div className="p-2 bg-gray-100 dark:bg-gray-800 rounded-lg text-center">
+                  <p className="text-xs text-muted-foreground">{t.systemStock}</p>
+                  <p className="text-lg font-bold">{selectedRecord.system_stock}</p>
+                </div>
+                <div className="p-2 bg-blue-50 dark:bg-blue-950/30 rounded-lg text-center">
+                  <p className="text-xs text-muted-foreground">{t.countedStock}</p>
+                  <p className="text-lg font-bold">{selectedRecord.counted_stock}</p>
+                </div>
+                <div className={cn(
+                  "p-2 rounded-lg text-center",
+                  selectedRecord.difference > 0 ? "bg-green-100 dark:bg-green-950/30" :
+                    selectedRecord.difference < 0 ? "bg-red-100 dark:bg-red-950/30" : "bg-gray-100 dark:bg-gray-800"
+                )}>
+                  <p className="text-xs text-muted-foreground">{t.difference}</p>
+                  <p className={cn(
+                    "text-lg font-bold",
+                    selectedRecord.difference > 0 ? "text-green-600" :
+                      selectedRecord.difference < 0 ? "text-red-600" : "text-gray-600"
+                  )}>
+                    {selectedRecord.difference > 0 ? `+${selectedRecord.difference}` : selectedRecord.difference}
+                  </p>
+                </div>
+              </div>
+
+              {/* عرض الألوان والمقاسات */}
+              {displayVariants.length > 0 ? (
+                <div className="space-y-2 mt-4">
+                  <div className="flex items-center justify-between">
+                    <Label className="text-sm font-medium">
+                      {language === 'ar' ? 'المقاسات والألوان' : 'Sizes & Colors'}
+                      <span className="text-xs text-muted-foreground ms-2">({displayVariants.length})</span>
+                    </Label>
+                    <span className="text-xs font-medium">
+                      {language === 'ar' ? 'المجموع: ' : 'Total: '}
+                      <b className="text-primary">
+                        {displayVariants.reduce((s, v) => s + (Number(v.counted_stock) || 0), 0)}
+                      </b>
+                    </span>
+                  </div>
+                  <div className="border rounded-lg divide-y max-h-[250px] overflow-y-auto bg-card">
+                    {displayVariants.map((v, idx) => (
+                      <div key={`${v.product_unit_id}-${v.color_id}`} className="flex items-center gap-2 p-2 hover:bg-muted/30">
+                        <Badge variant="secondary" className="text-xs shrink-0 min-w-[40px] justify-center">
+                          {v.unit_name}
+                        </Badge>
+                        <Badge variant="outline" className="text-xs gap-1 shrink-0">
+                          <div className="w-3 h-3 rounded-full border border-gray-200" style={{ backgroundColor: v.color_code }} />
+                          {v.color_name}
+                        </Badge>
+                        <div className="flex-1 text-xs text-muted-foreground text-end">
+                          {language === 'ar' ? 'مخزون النظام: ' : 'System: '}
+                          <b>{v.original_stock}</b>
+                        </div>
+                        {/* ✅ Input معطّل في وضع العرض فقط */}
+                        <Input
+                          type="number"
+                          min="0"
+                          disabled={isViewMode}
+                          value={v.counted_stock}
+                          onChange={(e) => {
+                            if (isViewMode) return;
+                            const val = Number(e.target.value);
+                            const base = displayVariants.map(x => ({ ...x }));
+                            base[idx] = { ...base[idx], counted_stock: isNaN(val) ? 0 : val };
+                            setEditVariants(base);
+                          }}
+                          className={cn(
+                            "w-20 text-center h-8",
+                            !isViewMode && v.counted_stock !== v.original_stock && "border-blue-500 bg-blue-50 dark:bg-blue-950/30 font-bold",
+                            isViewMode && "bg-muted cursor-not-allowed"
+                          )}
+                        />
+                      </div>
+                    ))}
                   </div>
                 </div>
-                <div className="space-y-2">
+              ) : (
+                <div className="space-y-2 mt-4">
                   <Label>{t.countedStock}</Label>
-                  <Input 
-                    type="number" 
-                    min="0" 
-                    value={editCountedStock} 
-                    onChange={(e) => setEditCountedStock(Number(e.target.value))} 
-                    className="text-center text-lg font-medium" 
+                  {/* ✅ Input معطّل في وضع العرض فقط */}
+                  <Input
+                    type="number"
+                    min="0"
+                    disabled={isViewMode}
+                    value={editCountedStock}
+                    onChange={(e) => {
+                      if (isViewMode) return;
+                      setEditCountedStock(Number(e.target.value));
+                    }}
+                    className={cn(
+                      "text-center text-lg font-medium",
+                      isViewMode && "bg-muted cursor-not-allowed"
+                    )}
                   />
                 </div>
-              </div>
-              
-              <div className={cn("p-3 rounded-lg text-center", difference > 0 ? "bg-green-100" : difference < 0 ? "bg-red-100" : "bg-gray-100")}>
-                <p className="text-xs text-muted-foreground mb-1">{t.difference}</p>
-                <p className={cn("text-lg font-bold", difference > 0 ? "text-green-600" : difference < 0 ? "text-red-600" : "text-gray-600")}>
-                  {difference > 0 ? `+${difference}` : difference}
-                </p>
-              </div>
-              
-              {isDifferent && (
-                <div className="flex items-center gap-2 p-3 bg-yellow-50 rounded-lg border border-yellow-200">
-                  <AlertTriangle size={16} className="text-yellow-600" />
-                  <div className="flex-1">
-                    <Label className="text-sm font-medium">{t.updateActualStock}</Label>
-                    <p className="text-xs text-muted-foreground">{t.willUpdateStock}</p>
-                  </div>
-                  <button 
-                    onClick={() => setUpdateStock(!updateStock)} 
-                    className={cn("w-10 h-5 rounded-full transition-colors relative", updateStock ? "bg-green-500" : "bg-gray-300")}
-                  >
-                    <div className={cn("absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform", updateStock ? "translate-x-5" : "translate-x-0.5")} />
-                  </button>
-                </div>
               )}
-              
-              <div className="space-y-2">
+
+              {/* ملاحظات */}
+              <div className="space-y-2 mt-4">
                 <Label>{t.notes}</Label>
-                <Textarea value={editNote} onChange={(e) => setEditNote(e.target.value)} rows={3} placeholder={t.addNote} />
+                {/* ✅ Textarea معطّل في وضع العرض فقط */}
+                <Textarea
+                  value={editNote}
+                  onChange={(e) => {
+                    if (isViewMode) return;
+                    setEditNote(e.target.value);
+                  }}
+                  rows={2}
+                  disabled={isViewMode}
+                  placeholder={t.addNote}
+                  className={cn(isViewMode && "bg-muted cursor-not-allowed")}
+                />
               </div>
             </div>
           ) : null}
-          
-          <DialogFooter className="gap-2">
-            <Button variant="outline" onClick={() => setEditRecordOpen(false)}>{t.cancel}</Button>
-            <Button onClick={handleSaveEdit} disabled={updateMutation.isPending} className="gap-2">
-              {updateMutation.isPending ? <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" /> : <Save size={16} />}
-              {updateMutation.isPending ? (language === 'ar' ? 'جاري الحفظ...' : 'Saving...') : t.saveChanges}
-            </Button>
+
+          <DialogFooter className="p-4 border-t gap-2">
+            {/* ✅ في وضع العرض: زرار إغلاق فقط */}
+            {isViewMode ? (
+              <Button variant="outline" onClick={() => setEditRecordOpen(false)}>
+                {t.close}
+              </Button>
+            ) : (
+              <>
+                <Button variant="outline" onClick={() => setEditRecordOpen(false)}>{t.cancel}</Button>
+                <Button onClick={handleSaveEdit} disabled={updateMutation.isPending} className="gap-2">
+                  {updateMutation.isPending ? <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" /> : <Save size={16} />}
+                  {updateMutation.isPending ? (language === 'ar' ? 'جاري الحفظ...' : 'Saving...') : t.saveChanges}
+                </Button>
+              </>
+            )}
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -995,26 +1096,22 @@ const InventoryCount = () => {
         <DialogContent className="w-[96vw] max-w-[1500px] max-h-[94vh] overflow-hidden flex flex-col p-0">
           <DialogHeader className="p-4 border-b">
             <DialogTitle className="flex items-center gap-2">
-              <Plus size={18} />
-              {t.newCount}
+              <Plus size={18} />{t.newCount}
             </DialogTitle>
           </DialogHeader>
-          
+
           <div className="flex-1 overflow-y-auto p-4 space-y-4">
-            {/* اختيار المخزن */}
             <div className="space-y-2">
               <Label>{t.warehouse} *</Label>
-              <Select 
-                value={selectedWarehouse} 
-                onValueChange={(v) => { 
-                  setSelectedWarehouse(v); 
-                  setCountedProducts([]); 
+              <Select
+                value={selectedWarehouse}
+                onValueChange={(v) => {
+                  setSelectedWarehouse(v);
+                  setCountedProducts([]);
                   setSearchQuery('');
                 }}
               >
-                <SelectTrigger>
-                  <SelectValue placeholder={t.selectWarehouse} />
-                </SelectTrigger>
+                <SelectTrigger><SelectValue placeholder={t.selectWarehouse} /></SelectTrigger>
                 <SelectContent>
                   {warehouses.map((w: Warehouse) => (
                     <SelectItem key={w.id} value={w.id.toString()}>
@@ -1027,32 +1124,25 @@ const InventoryCount = () => {
                 </SelectContent>
               </Select>
             </div>
-            
-            {/* الملاحظات */}
+
             <div className="space-y-2">
               <Label>{t.notes}</Label>
-              <Textarea 
-                value={countNotes} 
-                onChange={(e) => setCountNotes(e.target.value)} 
-                rows={2} 
-                placeholder={language === 'ar' ? 'ملاحظات إضافية...' : 'Additional notes...'} 
+              <Textarea
+                value={countNotes}
+                onChange={(e) => setCountNotes(e.target.value)}
+                rows={2}
+                placeholder={language === 'ar' ? 'ملاحظات إضافية...' : 'Additional notes...'}
               />
             </div>
-            
+
             {selectedWarehouse && (
               <>
-                {/* المنتجات المختارة */}
                 {selectedProductsSummary.length > 0 && (
                   <div className="bg-primary/5 p-3 rounded-lg border">
                     <div className="flex items-center justify-between mb-2">
                       <span className="text-sm font-medium">{t.selectedProducts}</span>
                       <Badge variant="secondary">{selectedProductsSummary.length} {t.productsCount}</Badge>
-                      <Button 
-                        variant="ghost" 
-                        size="sm" 
-                        onClick={handleClearAllProducts} 
-                        className="h-7 text-xs text-destructive"
-                      >
+                      <Button variant="ghost" size="sm" onClick={handleClearAllProducts} className="h-7 text-xs text-destructive">
                         <X size={12} className="me-1" />
                         {language === 'ar' ? 'مسح الكل' : 'Clear All'}
                       </Button>
@@ -1063,7 +1153,7 @@ const InventoryCount = () => {
                           <div key={`selected-${p.product_id}-${p.unit_id}-${p.color_id}-${idx}`} className="flex items-center justify-between text-xs p-1 hover:bg-primary/10 rounded">
                             <div className="flex-1 min-w-0">
                               <span className="truncate block">
-                                {language === 'ar' ? p.product_name : p.product_name}
+                                {p.product_name}
                                 {p.unit_name && ` (${p.unit_name})`}
                                 {p.color && ` - ${p.color}`}
                               </span>
@@ -1071,12 +1161,8 @@ const InventoryCount = () => {
                             <div className="flex items-center gap-2 shrink-0">
                               <span className="font-medium text-green-600">{p.counted_stock}</span>
                               <span className="text-muted-foreground">/ {p.system_stock}</span>
-                              <Button 
-                                variant="ghost" 
-                                size="icon" 
-                                className="h-5 w-5" 
-                                onClick={() => handleRemoveProductFromCount(p.product_id, p.unit_id, p.color_id)}
-                              >
+                              <Button variant="ghost" size="icon" className="h-5 w-5"
+                                onClick={() => handleRemoveProductFromCount(p.product_id, p.unit_id, p.color_id)}>
                                 <X size={10} />
                               </Button>
                             </div>
@@ -1086,22 +1172,20 @@ const InventoryCount = () => {
                     </ScrollArea>
                   </div>
                 )}
-                
-                {/* البحث عن المنتجات */}
+
                 <div className="space-y-2">
                   <Label>{t.product}</Label>
                   <div className="relative">
                     <Search className="absolute start-3 top-1/2 -translate-y-1/2 text-muted-foreground" size={16} />
-                    <Input 
-                      placeholder={t.searchProducts} 
-                      value={searchQuery} 
-                      onChange={(e) => setSearchQuery(e.target.value)} 
-                      className="ps-9" 
+                    <Input
+                      placeholder={t.searchProducts}
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      className="ps-9"
                     />
                   </div>
                 </div>
-                
-                {/* قائمة المنتجات */}
+
                 <ScrollArea className="h-[min(52vh,560px)] border rounded-lg">
                   {flattenedProducts.length === 0 ? (
                     <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
@@ -1111,25 +1195,26 @@ const InventoryCount = () => {
                   ) : (
                     <div className="p-2 space-y-2">
                       {flattenedProducts.map((item: CountedProduct, idx: number) => {
-                        const countedItem = countedProducts.find(p => 
-                          p.product_id === item.product_id && 
-                          p.unit_id === item.unit_id && 
+                        const countedItem = countedProducts.find(p =>
+                          p.product_id === item.product_id &&
+                          p.unit_id === item.unit_id &&
                           p.color_id === item.color_id
                         );
-                        
+
                         return (
-                          <div 
-                            key={`product-${item.product_id}-${item.unit_id}-${item.color_id}-${idx}`} 
+                          <div
+                            key={`product-${item.product_id}-${item.unit_id}-${item.color_id}-${idx}`}
                             className="flex items-center gap-4 p-3 rounded-lg border bg-card hover:bg-muted/50"
                           >
-                            {/* معلومات المنتج */}
                             <div className="flex-1 min-w-0">
-                              <p className="font-medium truncate">
-                                {language === 'ar' ? item.product_name : item.product_name}
-                              </p>
+                              <p className="font-medium truncate">{item.product_name}</p>
                               <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground mt-1">
                                 <span className="font-mono">{item.sku}</span>
-                                {(item as any).barcode && <span className="font-mono">{language === 'ar' ? 'باركود' : 'Barcode'}: {(item as any).barcode}</span>}
+                                {(item as any).barcode && (
+                                  <span className="font-mono">
+                                    {language === 'ar' ? 'باركود' : 'Barcode'}: {(item as any).barcode}
+                                  </span>
+                                )}
                                 {item.unit_name && (
                                   <>
                                     <span>•</span>
@@ -1142,8 +1227,8 @@ const InventoryCount = () => {
                                   <>
                                     <span>•</span>
                                     <Badge variant="outline" className="text-xs gap-1">
-                                      <div 
-                                        className="w-3 h-3 rounded-full" 
+                                      <div
+                                        className="w-3 h-3 rounded-full"
                                         style={{ backgroundColor: item.color_hex || '#ccc' }}
                                       />
                                       {item.color}
@@ -1154,8 +1239,7 @@ const InventoryCount = () => {
                                 <span>{t.systemStock}: {item.system_stock}</span>
                               </div>
                             </div>
-                            
-                            {/* حقل الإدخال والأزرار */}
+
                             <div className="flex items-center gap-2 shrink-0">
                               <Input
                                 type="number"
@@ -1166,18 +1250,18 @@ const InventoryCount = () => {
                                 placeholder="0"
                               />
                               {countedItem ? (
-                                <Button 
-                                  variant="ghost" 
-                                  size="icon" 
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
                                   className="h-9 w-9 text-destructive"
                                   onClick={() => handleRemoveProductFromCount(item.product_id, item.unit_id, item.color_id)}
                                 >
                                   <X size={16} />
                                 </Button>
                               ) : (
-                                <Button 
-                                  variant="outline" 
-                                  size="icon" 
+                                <Button
+                                  variant="outline"
+                                  size="icon"
                                   className="h-9 w-9"
                                   onClick={() => handleAddProductToCount(item, item.system_stock || 0)}
                                 >
@@ -1194,20 +1278,19 @@ const InventoryCount = () => {
               </>
             )}
           </div>
-          
+
           <DialogFooter className="p-4 border-t gap-2">
-            <Button variant="outline" onClick={() => setNewCountOpen(false)}>
-              {t.cancel}
-            </Button>
-            <Button 
+            <Button variant="outline" onClick={() => setNewCountOpen(false)}>{t.cancel}</Button>
+            <Button
               onClick={() => {
-                const productsToSend = countedProducts.map(p => ({
+                const productsToSend = countedProducts.map((p: any) => ({
                   product_id: p.product_id,
-                  unit_id: p.unit_id,
-                  color_id: p.color_id,
-                  counted_stock: p.counted_stock
+                  unit_id: p.unit_id ?? null,
+                  product_unit_id: p.product_unit_id ?? null,
+                  color_id: p.color_id ?? null,
+                  counted_stock: p.counted_stock ?? 0
                 }));
-                
+
                 createMutation.mutate({
                   warehouse_id: Number(selectedWarehouse),
                   note: countNotes,
@@ -1222,7 +1305,7 @@ const InventoryCount = () => {
                     refetchRecords();
                   }
                 });
-              }} 
+              }}
               disabled={!selectedWarehouse || countedProducts.length === 0 || createMutation.isPending}
               className="gap-2"
             >
@@ -1240,11 +1323,7 @@ const InventoryCount = () => {
       {/* Print Template */}
       {showPrint && printData && (
         <div style={{ display: 'none' }}>
-          <InventoryPrintTemplate
-            ref={printRef}
-            data={printData}
-            companyInfo={companyInfo}
-          />
+          <InventoryPrintTemplate ref={printRef} data={printData} companyInfo={companyInfo} />
         </div>
       )}
     </div>

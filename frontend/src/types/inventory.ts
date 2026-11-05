@@ -115,9 +115,21 @@ export interface InventoryCount {
 }
 
 // ========== Counted Product Types ==========
+// src/types/inventory.ts
 export interface CountedProduct {
   product_id: number;
+  unit_id?: number | null;
+  product_unit_id?: number | null;  // ← ضيف السطر ده
+  color_id?: number | null;
   counted_stock: number;
+  system_stock: number;
+  product_name: string;
+  unit_name: string | null;
+  color: string | null;
+  color_hex: string | null;
+  sku: string;
+  barcode?: string;
+  uniqueKey?: string;
 }
 
 // ========== API Response Types ==========
