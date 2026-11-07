@@ -21,7 +21,6 @@ import CRM from "./pages/CRM";
 import Reports from "./pages/Reports";
 import Settings from "./pages/Settings";
 import NotFound from "./pages/NotFound";
-import Manufacturing from "./pages/Manufacturing";
 
 const queryClient = new QueryClient();
 
@@ -34,31 +33,31 @@ const App = () => (
             <TooltipProvider>
               <Toaster />
               <Sonner />
-            <BrowserRouter>
-              <Routes>
-                <Route path="/auth" element={<Auth />} />
-                <Route path="/" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
-                <Route path="/pos" element={<ProtectedRoute><POS /></ProtectedRoute>} />
-                <Route path="/inventory" element={<ProtectedRoute><Inventory /></ProtectedRoute>} />
-                <Route path="/purchasing" element={<ProtectedRoute><Purchasing /></ProtectedRoute>} />
-                <Route path="/sales" element={<ProtectedRoute><Sales /></ProtectedRoute>} />
-                <Route path="/finance" element={<ProtectedRoute><Finance /></ProtectedRoute>} />
-                <Route path="/hr" element={<ProtectedRoute><HR /></ProtectedRoute>} />
-                <Route path="/crm" element={<ProtectedRoute><CRM /></ProtectedRoute>} />
-                <Route path="/reports" element={<ProtectedRoute><Reports /></ProtectedRoute>} />
-                <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
-                <Route path="/manufacturing" element={<ProtectedRoute><Manufacturing /></ProtectedRoute>} />
-                <Route path="/POSRetrun" element={<ProtectedRoute><POSRetrun /></ProtectedRoute>} />
-                {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
-                <Route path="*" element={<NotFound />} />
-              </Routes>
-            </BrowserRouter>
-          </TooltipProvider>
-        </AppProvider>
-      </RegionalSettingsProvider>
-    </AuthProvider>
-  </LanguageProvider>
-</QueryClientProvider>
+              <BrowserRouter>
+                <Routes>
+                  <Route path="/auth" element={<Auth />} />
+                  <Route path="/" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
+                  <Route path="/pos" element={<ProtectedRoute><POS /></ProtectedRoute>} />
+                  <Route path="/inventory" element={<ProtectedRoute><Inventory /></ProtectedRoute>} />
+                  <Route path="/purchasing" element={<ProtectedRoute><Purchasing /></ProtectedRoute>} />
+                  <Route path="/sales" element={<ProtectedRoute><Sales /></ProtectedRoute>} />
+                  <Route path="/finance" element={<ProtectedRoute><Finance /></ProtectedRoute>} />
+                  <Route path="/hr" element={<ProtectedRoute><HR /></ProtectedRoute>} />
+                  <Route path="/crm" element={<ProtectedRoute><CRM /></ProtectedRoute>} />
+                  <Route path="/reports" element={<ProtectedRoute><Reports /></ProtectedRoute>} />
+                  <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
+                  {/* <Route path="/manufacturing" element={<ProtectedRoute><Manufacturing /></ProtectedRoute>} /> */}
+                  <Route path="/POSRetrun" element={<ProtectedRoute><POSRetrun /></ProtectedRoute>} />
+                  {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
+                  <Route path="*" element={<NotFound />} />
+                </Routes>
+              </BrowserRouter>
+            </TooltipProvider>
+          </AppProvider>
+        </RegionalSettingsProvider>
+      </AuthProvider>
+    </LanguageProvider>
+  </QueryClientProvider>
 );
 
 export default App;
