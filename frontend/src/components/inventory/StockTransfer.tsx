@@ -122,11 +122,6 @@ const computeEffectiveStock = (item: WarehouseProduct): number => {
   }, 0);
 };
 
-const getWarehouseProductBarcode = (item: WarehouseProduct): string => {
-  const directBarcode = item.barcode || item.product?.barcode;
-  return directBarcode ? String(directBarcode) : '';
-};
-
 const StockTransfer = () => {
   const { language } = useLanguage();
   const queryClient = useQueryClient();
@@ -240,7 +235,7 @@ const StockTransfer = () => {
             ...item,
             product_id: item.id,
             product_name: item.name,
-            barcode: getWarehouseProductBarcode(item),
+            barcode: item.barcode || '',
             warehouse_name:
               warehouses.find(
                 (w: Warehouse) => w.id === Number(warehouseFilter),
@@ -369,9 +364,6 @@ const StockTransfer = () => {
         }),
       ]);
 
-      setRecentTransferProductIds([
-        ...new Set(transferItems.map((item) => item.product_id)),
-      ]);
       setShowTransferModal(false);
       setTransferItems([]);
       setProductNotes({});
@@ -493,45 +485,45 @@ const StockTransfer = () => {
 
       return language === 'ar'
         ? {
-            المنتج: row.productName,
-            المقاس: row.unitName || '-',
-            اللون: row.colorName || '-',
-            الباركود: row.barcode || '-',
-            'المخزون المتاح': row.stock,
-            'كمية التحويل': transferItem?.quantity || 0,
-            ملاحظة: productNotes[noteKey] || '',
-          }
+          المنتج: row.productName,
+          المقاس: row.unitName || '-',
+          اللون: row.colorName || '-',
+          الباركود: row.barcode || '-',
+          'المخزون المتاح': row.stock,
+          'كمية التحويل': transferItem?.quantity || 0,
+          ملاحظة: productNotes[noteKey] || '',
+        }
         : {
-            Product: row.productName,
-            Size: row.unitName || '-',
-            Color: row.colorName || '-',
-            Barcode: row.barcode || '-',
-            'Available Stock': row.stock,
-            'Transfer Quantity': transferItem?.quantity || 0,
-            Note: productNotes[noteKey] || '',
-          };
+          Product: row.productName,
+          Size: row.unitName || '-',
+          Color: row.colorName || '-',
+          Barcode: row.barcode || '-',
+          'Available Stock': row.stock,
+          'Transfer Quantity': transferItem?.quantity || 0,
+          Note: productNotes[noteKey] || '',
+        };
     });
 
     const worksheet = XLSX.utils.json_to_sheet(exportData);
     worksheet['!cols'] = language === 'ar'
       ? [
-          { wch: 28 },
-          { wch: 14 },
-          { wch: 18 },
-          { wch: 18 },
-          { wch: 18 },
-          { wch: 18 },
-          { wch: 30 },
-        ]
+        { wch: 28 },
+        { wch: 14 },
+        { wch: 18 },
+        { wch: 18 },
+        { wch: 18 },
+        { wch: 18 },
+        { wch: 30 },
+      ]
       : [
-          { wch: 28 },
-          { wch: 14 },
-          { wch: 18 },
-          { wch: 18 },
-          { wch: 18 },
-          { wch: 18 },
-          { wch: 30 },
-        ];
+        { wch: 28 },
+        { wch: 14 },
+        { wch: 18 },
+        { wch: 18 },
+        { wch: 18 },
+        { wch: 18 },
+        { wch: 30 },
+      ];
 
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(
@@ -558,17 +550,17 @@ const StockTransfer = () => {
     const exportData = products.map((item: WarehouseProduct) => ({
       ...(language === 'ar'
         ? {
-            المنتج: item.product_name || item.name || '-',
-            الباركود: getWarehouseProductBarcode(item) || '-',
-            المخزن: item.warehouse_name || '-',
-            المخزون: computeEffectiveStock(item),
-          }
+          المنتج: item.product_name || item.name || '-',
+          الباركود: item.barcode || '-',
+          المخزن: item.warehouse_name || '-',
+          المخزون: computeEffectiveStock(item),
+        }
         : {
-            Product: item.product_name || item.name || '-',
-            Barcode: getWarehouseProductBarcode(item) || '-',
-            Warehouse: item.warehouse_name || '-',
-            Stock: computeEffectiveStock(item),
-          }),
+          Product: item.product_name || item.name || '-',
+          Barcode: item.barcode || '-',
+          Warehouse: item.warehouse_name || '-',
+          Stock: computeEffectiveStock(item),
+        }),
     }));
 
     const worksheet = XLSX.utils.json_to_sheet(exportData);
@@ -675,7 +667,8 @@ const StockTransfer = () => {
             colorId: Number(color.color_id),
             colorName: color.color || '',
             hexCode: color.hex_code || '',
-            barcode: getWarehouseProductBarcode(item),
+            barcode:
+              unit.barcode || item.barcode || item.product?.barcode || '',
             stock: stockForWarehouse,
             totalStock,
 
@@ -834,7 +827,7 @@ const StockTransfer = () => {
                           </TableCell>
                           <TableCell>
                             <Badge variant="outline" className="font-mono">
-                              {getWarehouseProductBarcode(item) || '-'}
+                              {item.barcode || '-'}
                             </Badge>
                           </TableCell>
                           <TableCell>{item.warehouse_name}</TableCell>
