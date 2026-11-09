@@ -122,6 +122,15 @@ const computeEffectiveStock = (item: WarehouseProduct): number => {
   }, 0);
 };
 
+const getWarehouseProductBarcode = (item: WarehouseProduct): string => {
+  const directBarcode = item.barcode || item.product?.barcode;
+  if (directBarcode) return String(directBarcode);
+
+  const units = item.units || item.product?.units || [];
+  const unitBarcode = units.find((unit) => unit.barcode)?.barcode;
+  return unitBarcode ? String(unitBarcode) : '';
+};
+
 const StockTransfer = () => {
   const { language } = useLanguage();
   const queryClient = useQueryClient();
@@ -235,7 +244,7 @@ const StockTransfer = () => {
             ...item,
             product_id: item.id,
             product_name: item.name,
-            barcode: item.barcode || '',
+            barcode: getWarehouseProductBarcode(item),
             warehouse_name:
               warehouses.find(
                 (w: Warehouse) => w.id === Number(warehouseFilter),
@@ -551,13 +560,13 @@ const StockTransfer = () => {
       ...(language === 'ar'
         ? {
             المنتج: item.product_name || item.name || '-',
-            الباركود: item.barcode || '-',
+            الباركود: getWarehouseProductBarcode(item) || '-',
             المخزن: item.warehouse_name || '-',
             المخزون: computeEffectiveStock(item),
           }
         : {
             Product: item.product_name || item.name || '-',
-            Barcode: item.barcode || '-',
+            Barcode: getWarehouseProductBarcode(item) || '-',
             Warehouse: item.warehouse_name || '-',
             Stock: computeEffectiveStock(item),
           }),
@@ -827,7 +836,7 @@ const StockTransfer = () => {
                           </TableCell>
                           <TableCell>
                             <Badge variant="outline" className="font-mono">
-                              {item.barcode || '-'}
+                              {getWarehouseProductBarcode(item) || '-'}
                             </Badge>
                           </TableCell>
                           <TableCell>{item.warehouse_name}</TableCell>
