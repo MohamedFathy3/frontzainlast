@@ -86,18 +86,6 @@ interface TransferProduct {
   note?: string;
 }
 
-interface WarehouseTransferRecord {
-  id: number;
-  from_warehouse_id: number;
-  to_warehouse_id: number;
-  inventory_value: string | number;
-  total_quantity?: number | null;
-  total_items?: number | null;
-  created_at: string;
-  source_warehouse?: Warehouse;
-  destination_warehouse?: Warehouse;
-}
-
 /**
  * ✅ الرصيد الفعلي للمنتج داخل المخزن:
  * - منتج بدون units (بدون مقاسات/ألوان) → item.stock
@@ -188,13 +176,6 @@ const StockTransfer = () => {
       export: 'Export Excel',
       noDataToExport: 'No data to export',
       exportSuccess: 'Data exported successfully',
-      transferHistory: 'Recent Transfers',
-      transferDate: 'Date',
-      source: 'From',
-      destination: 'To',
-      items: 'Items',
-      transferQuantity: 'Quantity',
-      noTransfers: 'No completed transfers yet',
     },
     ar: {
       title: 'مخزون المخازن',
@@ -229,13 +210,6 @@ const StockTransfer = () => {
       export: 'تصدير Excel',
       noDataToExport: 'لا توجد بيانات للتصدير',
       exportSuccess: 'تم تصدير البيانات بنجاح',
-      transferHistory: 'آخر عمليات التحويل',
-      transferDate: 'التاريخ',
-      source: 'من مخزن',
-      destination: 'إلى مخزن',
-      items: 'الأصناف',
-      transferQuantity: 'الكمية',
-      noTransfers: 'لا توجد تحويلات مكتملة حتى الآن',
     },
   }[language];
 
@@ -333,15 +307,6 @@ const StockTransfer = () => {
     refetchOnWindowFocus: false,
   });
 
-  const { data: transferHistory = [], isLoading: transferHistoryLoading } = useQuery<WarehouseTransferRecord[]>({
-    queryKey: ['warehouse-transfer-history'],
-    queryFn: async () => {
-      const res = await api.get('/warehouses/transfers');
-      return res.data?.result === 'Success' ? res.data.data || [] : [];
-    },
-    refetchOnWindowFocus: false,
-  });
-
   // ========== 4. الإحصائيات ✅ بالرصيد الفعلي ==========
   const stats = useMemo(() => {
     const totalItems = products.length;
@@ -402,11 +367,11 @@ const StockTransfer = () => {
         queryClient.invalidateQueries({
           queryKey: ['modal-warehouse-products'],
         }),
-        queryClient.invalidateQueries({
-          queryKey: ['warehouse-transfer-history'],
-        }),
       ]);
 
+      setRecentTransferProductIds([
+        ...new Set(transferItems.map((item) => item.product_id)),
+      ]);
       setShowTransferModal(false);
       setTransferItems([]);
       setProductNotes({});
@@ -777,75 +742,6 @@ const StockTransfer = () => {
           </CardContent>
         </Card>
       </div>
-
-      {/* ===== سجل التحويلات: كل عملية كوحدة واحدة والأحدث أولًا ===== */}
-      <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="text-base flex items-center gap-2">
-            <ArrowLeftRight className="h-4 w-4 text-primary" />
-            {t.transferHistory}
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="p-0">
-          <ScrollArea className="h-[220px] w-full">
-            <div className="min-w-[760px]">
-              <Table>
-                <TableHeader className="sticky top-0 bg-background">
-                  <TableRow>
-                    <TableHead>{t.transferDate}</TableHead>
-                    <TableHead>{t.source}</TableHead>
-                    <TableHead>{t.destination}</TableHead>
-                    <TableHead className="text-center">{t.items}</TableHead>
-                    <TableHead className="text-center">{t.transferQuantity}</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {transferHistoryLoading ? (
-                    <TableRow>
-                      <TableCell colSpan={5} className="text-center py-6">
-                        {t.loading}
-                      </TableCell>
-                    </TableRow>
-                  ) : transferHistory.length === 0 ? (
-                    <TableRow>
-                      <TableCell colSpan={5} className="text-center py-6 text-muted-foreground">
-                        {t.noTransfers}
-                      </TableCell>
-                    </TableRow>
-                  ) : (
-                    transferHistory.map((transfer) => (
-                      <TableRow key={transfer.id}>
-                        <TableCell className="whitespace-nowrap">
-                          {new Date(transfer.created_at).toLocaleString(
-                            language === 'ar' ? 'ar-EG' : 'en-US',
-                          )}
-                        </TableCell>
-                        <TableCell>
-                          {language === 'ar'
-                            ? transfer.source_warehouse?.name_ar || transfer.source_warehouse?.name || '-'
-                            : transfer.source_warehouse?.name || '-'}
-                        </TableCell>
-                        <TableCell>
-                          {language === 'ar'
-                            ? transfer.destination_warehouse?.name_ar || transfer.destination_warehouse?.name || '-'
-                            : transfer.destination_warehouse?.name || '-'}
-                        </TableCell>
-                        <TableCell className="text-center">
-                          {transfer.total_items ?? '-'}
-                        </TableCell>
-                        <TableCell className="text-center font-medium">
-                          {transfer.total_quantity ?? '-'}
-                        </TableCell>
-                      </TableRow>
-                    ))
-                  )}
-                </TableBody>
-              </Table>
-            </div>
-            <ScrollBar orientation="horizontal" />
-          </ScrollArea>
-        </CardContent>
-      </Card>
 
       {/* ===== الفلاتر ===== */}
       <Card>
