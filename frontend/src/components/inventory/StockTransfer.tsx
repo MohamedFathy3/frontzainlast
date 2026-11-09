@@ -321,6 +321,11 @@ const StockTransfer = () => {
     return { totalItems, totalStock };
   }, [products]);
 
+  const barcodeProducts = useMemo(
+    () => products.filter((item: WarehouseProduct) => getWarehouseProductBarcode(item)),
+    [products],
+  );
+
   // ========== 5. تحويل منتجات ==========
   const transferMutation = useMutation({
     mutationFn: async () => {
@@ -548,7 +553,7 @@ const StockTransfer = () => {
   };
 
   const handleExportProductsData = () => {
-    if (products.length === 0) {
+    if (barcodeProducts.length === 0) {
       toast({
         title: t.noDataToExport,
         variant: 'destructive',
@@ -556,7 +561,7 @@ const StockTransfer = () => {
       return;
     }
 
-    const exportData = products.map((item: WarehouseProduct) => ({
+    const exportData = barcodeProducts.map((item: WarehouseProduct) => ({
       ...(language === 'ar'
         ? {
             المنتج: item.product_name || item.name || '-',
@@ -705,7 +710,7 @@ const StockTransfer = () => {
             variant="outline"
             size="sm"
             onClick={handleExportProductsData}
-            disabled={isLoading || products.length === 0}
+            disabled={isLoading || barcodeProducts.length === 0}
           >
             <FileSpreadsheet className="h-4 w-4 ml-2" />
             {t.export}
@@ -814,7 +819,7 @@ const StockTransfer = () => {
                         {t.loading}
                       </TableCell>
                     </TableRow>
-                  ) : products.length === 0 ? (
+                  ) : barcodeProducts.length === 0 ? (
                     <TableRow>
                       <TableCell
                         colSpan={4}
@@ -825,7 +830,7 @@ const StockTransfer = () => {
                       </TableCell>
                     </TableRow>
                   ) : (
-                    products.map((item: WarehouseProduct) => {
+                    barcodeProducts.map((item: WarehouseProduct) => {
                       // ✅ الرصيد الفعلي بدل item.stock
                       const effective = computeEffectiveStock(item);
 
