@@ -538,6 +538,51 @@ const StockTransfer = () => {
     toast({ title: t.exportSuccess });
   };
 
+  const handleExportProductsData = () => {
+    if (products.length === 0) {
+      toast({
+        title: t.noDataToExport,
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    const exportData = products.map((item: WarehouseProduct) => ({
+      ...(language === 'ar'
+        ? {
+            المنتج: item.product_name || item.name || '-',
+            الباركود: item.barcode || '-',
+            المخزن: item.warehouse_name || '-',
+            المخزون: computeEffectiveStock(item),
+          }
+        : {
+            Product: item.product_name || item.name || '-',
+            Barcode: item.barcode || '-',
+            Warehouse: item.warehouse_name || '-',
+            Stock: computeEffectiveStock(item),
+          }),
+    }));
+
+    const worksheet = XLSX.utils.json_to_sheet(exportData);
+    worksheet['!cols'] = [
+      { wch: 30 },
+      { wch: 20 },
+      { wch: 24 },
+      { wch: 16 },
+    ];
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(
+      workbook,
+      worksheet,
+      language === 'ar' ? 'مخزون المخازن' : 'Warehouse Stock',
+    );
+    XLSX.writeFile(
+      workbook,
+      `warehouse-stock-${new Date().toISOString().split('T')[0]}.xlsx`,
+    );
+    toast({ title: t.exportSuccess });
+  };
+
   // ========== 13. اسم المخزن ==========
   const getWarehouseName = (warehouseId: string) => {
     const w = warehouses.find(
@@ -647,6 +692,15 @@ const StockTransfer = () => {
           </div>
         </div>
         <div className="flex gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleExportProductsData}
+            disabled={isLoading || products.length === 0}
+          >
+            <FileSpreadsheet className="h-4 w-4 ml-2" />
+            {t.export}
+          </Button>
           <Button variant="outline" size="sm" onClick={() => refetch()}>
             <RefreshCw className="h-4 w-4 ml-2" />
             {t.refresh}
