@@ -403,7 +403,13 @@ const StockTransfer = () => {
         item.product_id === productId &&
           item.product_unit_id === unitId &&
           item.color_id === colorId
-          ? { ...item, quantity: Math.min(Math.max(1, quantity), row.stock) }
+          ? {
+              ...item,
+              quantity:
+                row.stock < 0
+                  ? Math.max(1, quantity)
+                  : Math.min(Math.max(1, quantity), row.stock),
+            }
           : item,
       ),
     );
@@ -1091,7 +1097,7 @@ const StockTransfer = () => {
                                   <Input
                                     type="number"
                                     min="1"
-                                    max={row.stock}
+                                    max={row.stock >= 0 ? row.stock : undefined}
                                     value={transferItem?.quantity || ''}
                                     onChange={(e) => {
                                       const qty =
@@ -1105,7 +1111,7 @@ const StockTransfer = () => {
                                             qty,
                                           );
                                         } else {
-                                          if (qty > row.stock) {
+                                          if (row.stock >= 0 && qty > row.stock) {
                                             toast({
                                               title: t.error,
                                               description:
