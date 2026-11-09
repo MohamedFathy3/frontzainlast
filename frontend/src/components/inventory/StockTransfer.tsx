@@ -86,6 +86,12 @@ interface TransferProduct {
   note?: string;
 }
 
+interface TransferDocument {
+  transfer_number: string;
+  transfer_date: string;
+  total_quantity: number;
+}
+
 /**
  * ✅ الرصيد الفعلي للمنتج داخل المخزن:
  * - منتج بدون units (بدون مقاسات/ألوان) → item.stock
@@ -135,6 +141,7 @@ const StockTransfer = () => {
   const [warehouseFilter, setWarehouseFilter] = useState<string>('all');
   const [transferItems, setTransferItems] = useState<TransferProduct[]>([]);
   const [productNotes, setProductNotes] = useState<Record<string, string>>({});
+  const [lastTransferDocument, setLastTransferDocument] = useState<TransferDocument | null>(null);
 
   // ========== Translation ==========
   const t = {
@@ -171,6 +178,10 @@ const StockTransfer = () => {
       export: 'Export Excel',
       noDataToExport: 'No data to export',
       exportSuccess: 'Data exported successfully',
+      transferNumber: 'Transfer Number',
+      transferDate: 'Transfer Date',
+      documentInfo: 'Transfer Document',
+      autoDocumentNumber: 'The WHS document number is generated automatically when saved',
     },
     ar: {
       title: 'مخزون المخازن',
@@ -205,6 +216,10 @@ const StockTransfer = () => {
       export: 'تصدير Excel',
       noDataToExport: 'لا توجد بيانات للتصدير',
       exportSuccess: 'تم تصدير البيانات بنجاح',
+      transferNumber: 'رقم التحويل',
+      transferDate: 'تاريخ التحويل',
+      documentInfo: 'بيانات مستند التحويل',
+      autoDocumentNumber: 'يتم إنشاء رقم مستند WHS تلقائيًا عند الحفظ',
     },
   }[language];
 
@@ -349,12 +364,18 @@ const StockTransfer = () => {
       return res.data;
     },
     onSuccess: async (data) => {
+      const transferData = data?.data || {};
+      setLastTransferDocument({
+        transfer_number: transferData.transfer_number,
+        transfer_date: transferData.transfer_date,
+        total_quantity: transferData.total_quantity ?? 0,
+      });
       toast({
         title: t.transferSuccess,
         description:
           language === 'ar'
-            ? `تم تحويل ${data?.data?.total_quantity ?? 0} وحدة بنجاح`
-            : `Transferred ${data?.data?.total_quantity ?? 0} units successfully`,
+            ? `تم إنشاء المستند ${transferData.transfer_number || '-'} بتاريخ ${transferData.transfer_date || '-'} وتحويل ${transferData.total_quantity ?? 0} وحدة بنجاح`
+            : `Document ${transferData.transfer_number || '-'} dated ${transferData.transfer_date || '-'} created; ${transferData.total_quantity ?? 0} units transferred successfully`,
       });
 
       await Promise.all([
@@ -742,6 +763,35 @@ const StockTransfer = () => {
         </Card>
       </div>
 
+      {lastTransferDocument && (
+        <Card className="border-primary/30 bg-primary/5">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base flex items-center gap-2">
+              <ArrowLeftRight className="h-4 w-4 text-primary" />
+              {t.documentInfo}
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-0">
+            <div>
+              <p className="text-xs text-muted-foreground">{t.transferNumber}</p>
+              <p className="font-mono font-bold">{lastTransferDocument.transfer_number}</p>
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground">{t.transferDate}</p>
+              <p className="font-medium">
+                {new Date(lastTransferDocument.transfer_date).toLocaleString(
+                  language === 'ar' ? 'ar-EG' : 'en-US',
+                )}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground">{t.totalQuantity}</p>
+              <p className="font-bold">{lastTransferDocument.total_quantity.toLocaleString()}</p>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       {/* ===== الفلاتر ===== */}
       <Card>
         <CardHeader className="pb-3">
@@ -871,6 +921,24 @@ const StockTransfer = () => {
               {t.newTransfer}
             </DialogTitle>
           </DialogHeader>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 rounded-lg border bg-muted/30 p-3">
+            <div>
+              <p className="text-xs text-muted-foreground">{t.transferNumber}</p>
+              <p className="font-mono font-semibold">
+                WHS-{new Date().toISOString().slice(0, 10).replace(/-/g, '')}-******
+              </p>
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground">{t.transferDate}</p>
+              <p className="font-medium">
+                {new Date().toLocaleString(language === 'ar' ? 'ar-EG' : 'en-US')}
+              </p>
+            </div>
+            <p className="text-xs text-muted-foreground sm:col-span-2">
+              {t.autoDocumentNumber}
+            </p>
+          </div>
 
           <div className="space-y-4 py-4">
             <div className="grid grid-cols-2 gap-4">
