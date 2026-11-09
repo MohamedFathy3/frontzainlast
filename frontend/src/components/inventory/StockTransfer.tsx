@@ -124,11 +124,7 @@ const computeEffectiveStock = (item: WarehouseProduct): number => {
 
 const getWarehouseProductBarcode = (item: WarehouseProduct): string => {
   const directBarcode = item.barcode || item.product?.barcode;
-  if (directBarcode) return String(directBarcode);
-
-  const units = item.units || item.product?.units || [];
-  const unitBarcode = units.find((unit) => unit.barcode)?.barcode;
-  return unitBarcode ? String(unitBarcode) : '';
+  return directBarcode ? String(directBarcode) : '';
 };
 
 const StockTransfer = () => {
@@ -681,8 +677,7 @@ const StockTransfer = () => {
             colorId: Number(color.color_id),
             colorName: color.color || '',
             hexCode: color.hex_code || '',
-            barcode:
-              unit.barcode || item.barcode || item.product?.barcode || '',
+            barcode: getWarehouseProductBarcode(item),
             stock: stockForWarehouse,
             totalStock,
 
