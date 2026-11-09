@@ -14,6 +14,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from '@/hooks/use-toast';
 import api from '@/lib/api';
 import { AxiosError } from 'axios';
+import * as XLSX from 'xlsx';
 import {
   Plus,
   Search,
@@ -26,6 +27,7 @@ import {
   ArrowLeftRight,
   ArrowRight,
   ArrowLeft,
+  FileSpreadsheet,
 } from 'lucide-react';
 
 // ========== أنواع البيانات ==========
@@ -166,6 +168,9 @@ const StockTransfer = () => {
       transferring: 'Transferring...',
       barcode: 'Barcode',
       totalStock: 'Total Stock',
+      export: 'Export Excel',
+      noDataToExport: 'No data to export',
+      exportSuccess: 'Data exported successfully',
     },
     ar: {
       title: 'مخزون المخازن',
@@ -197,6 +202,9 @@ const StockTransfer = () => {
       transferring: 'جاري التحويل...',
       barcode: 'الباركود',
       totalStock: 'إجمالي المخزون',
+      export: 'تصدير Excel',
+      noDataToExport: 'لا توجد بيانات للتصدير',
+      exportSuccess: 'تم تصدير البيانات بنجاح',
     },
   }[language];
 
@@ -456,7 +464,81 @@ const StockTransfer = () => {
     setTimeout(() => refetch(), 100);
   };
 
-  // ========== 12. اسم المخزن ==========
+  // ========== 12. تصدير بيانات مودال التحويل إلى Excel ==========
+  const handleExportTransferData = () => {
+    if (flattenedModalProducts.length === 0) {
+      toast({
+        title: t.noDataToExport,
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    const exportData = flattenedModalProducts.map((row) => {
+      const transferItem = transferItems.find(
+        (item) =>
+          item.product_id === row.productId &&
+          item.product_unit_id === row.unitId &&
+          item.color_id === row.colorId,
+      );
+      const noteKey = `${row.productId}-${row.unitId}-${row.colorId}`;
+
+      return language === 'ar'
+        ? {
+            المنتج: row.productName,
+            المقاس: row.unitName || '-',
+            اللون: row.colorName || '-',
+            الباركود: row.barcode || '-',
+            'المخزون المتاح': row.stock,
+            'كمية التحويل': transferItem?.quantity || 0,
+            ملاحظة: productNotes[noteKey] || '',
+          }
+        : {
+            Product: row.productName,
+            Size: row.unitName || '-',
+            Color: row.colorName || '-',
+            Barcode: row.barcode || '-',
+            'Available Stock': row.stock,
+            'Transfer Quantity': transferItem?.quantity || 0,
+            Note: productNotes[noteKey] || '',
+          };
+    });
+
+    const worksheet = XLSX.utils.json_to_sheet(exportData);
+    worksheet['!cols'] = language === 'ar'
+      ? [
+          { wch: 28 },
+          { wch: 14 },
+          { wch: 18 },
+          { wch: 18 },
+          { wch: 18 },
+          { wch: 18 },
+          { wch: 30 },
+        ]
+      : [
+          { wch: 28 },
+          { wch: 14 },
+          { wch: 18 },
+          { wch: 18 },
+          { wch: 18 },
+          { wch: 18 },
+          { wch: 30 },
+        ];
+
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(
+      workbook,
+      worksheet,
+      language === 'ar' ? 'بيانات التحويل' : 'Transfer Data',
+    );
+    XLSX.writeFile(
+      workbook,
+      `warehouse-transfer-${new Date().toISOString().split('T')[0]}.xlsx`,
+    );
+    toast({ title: t.exportSuccess });
+  };
+
+  // ========== 13. اسم المخزن ==========
   const getWarehouseName = (warehouseId: string) => {
     const w = warehouses.find(
       (w: Warehouse) => w.id === parseInt(warehouseId),
@@ -817,12 +899,25 @@ const StockTransfer = () => {
                         {t.fromWarehouse}: {getWarehouseName(fromWarehouse)}
                       </span>
                     </div>
-                    {modalSearchText && (
-                      <Badge variant="secondary" className="gap-1">
-                        <Search className="h-3 w-3" />
-                        {modalSearchText}
-                      </Badge>
-                    )}
+                    <div className="flex items-center gap-2">
+                      {modalSearchText && (
+                        <Badge variant="secondary" className="gap-1">
+                          <Search className="h-3 w-3" />
+                          {modalSearchText}
+                        </Badge>
+                      )}
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={handleExportTransferData}
+                        disabled={modalLoading || flattenedModalProducts.length === 0}
+                        className="gap-2"
+                      >
+                        <FileSpreadsheet className="h-4 w-4" />
+                        {t.export}
+                      </Button>
+                    </div>
                   </div>
                   <ScrollArea className="h-[300px]">
                     <Table>
