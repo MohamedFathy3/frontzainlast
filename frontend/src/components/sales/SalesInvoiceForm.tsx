@@ -146,6 +146,9 @@ interface SalesInvoiceFormProps {
   editInvoice?: any;
 }
 
+// تاريخ اليوم بصيغة YYYY-MM-DD حسب توقيت الجهاز
+const getToday = () => new Date().toLocaleDateString('en-CA');
+
 const SalesInvoiceForm = ({ isOpen, onClose, editInvoice }: SalesInvoiceFormProps) => {
   const { language } = useLanguage();
   const { currentBranch, userBranch } = useApp();
@@ -172,6 +175,7 @@ const SalesInvoiceForm = ({ isOpen, onClose, editInvoice }: SalesInvoiceFormProp
     branch_id: "",
     warehouse_id: "",
     treasury_id: "",
+    invoice_date: getToday(), // تاريخ الفاتورة (الافتراضي: اليوم)
     due_date: "",
     payment_method: "cash" as 'cash' | 'card' | 'wallet' | 'credit' | 'bank_transfer' | 'check',
     discount_percent: 0, // خصم على مستوى الفاتورة (%)
@@ -722,6 +726,7 @@ const SalesInvoiceForm = ({ isOpen, onClose, editInvoice }: SalesInvoiceFormProp
       branch_id: "",
       warehouse_id: "",
       treasury_id: "",
+      invoice_date: getToday(),
       due_date: "",
       payment_method: "cash",
       discount_percent: 0,
@@ -782,6 +787,14 @@ const SalesInvoiceForm = ({ isOpen, onClose, editInvoice }: SalesInvoiceFormProp
       toast.error(language === 'ar' ? 'يجب اختيار الخزينة' : 'Treasury is required');
       return;
     }
+    if (!formData.invoice_date) {
+      toast.error(language === 'ar' ? 'يجب اختيار تاريخ الفاتورة' : 'Invoice date is required');
+      return;
+    }
+    if (formData.due_date && formData.due_date < formData.invoice_date) {
+      toast.error(language === 'ar' ? 'تاريخ الاستحقاق لا يمكن أن يكون قبل تاريخ الفاتورة' : 'Due date cannot be before invoice date');
+      return;
+    }
     if (items.length === 0) {
       toast.error(language === 'ar' ? 'يجب إضافة أصناف' : 'Items are required');
       return;
@@ -821,6 +834,7 @@ const SalesInvoiceForm = ({ isOpen, onClose, editInvoice }: SalesInvoiceFormProp
       currency_id: Number(formData.currency_id),
       tax_id: Number(formData.tax_id),
       payment_method: formData.payment_method,
+      invoice_date: formData.invoice_date,            // تاريخ الفاتورة
       due_date: formData.due_date || null,
       note: formData.notes || null,
       discount_percentage: formData.discount_percent, // خصم الفاتورة %
@@ -858,8 +872,8 @@ const SalesInvoiceForm = ({ isOpen, onClose, editInvoice }: SalesInvoiceFormProp
           if (invoiceId) {
             // جلب الفاتورة وعرض dialogue الطباعة
             await fetchInvoiceForPrint(invoiceId);
-            return;
             // ⚠️ هنا نتوقف ولا نستدعي resetForm و onClose
+            return;
           } else {
             toast.error(language === 'ar' ? 'لم يتم العثور على رقم الفاتورة' : 'Invoice ID not found');
             resetForm();
@@ -869,9 +883,6 @@ const SalesInvoiceForm = ({ isOpen, onClose, editInvoice }: SalesInvoiceFormProp
           resetForm();
           onClose();
         }
-
-        resetForm();
-        onClose();
       } else {
         toast.error(language === 'ar' ? '❌ فشل في إنشاء الفاتورة' : '❌ Failed to create invoice');
       }
@@ -1006,10 +1017,27 @@ const SalesInvoiceForm = ({ isOpen, onClose, editInvoice }: SalesInvoiceFormProp
                     </Select>
                   </div>
 
+                  {/* تاريخ الفاتورة */}
+                  <div>
+                    <Label className="flex items-center gap-1 mb-2">
+                      {language === 'ar' ? 'تاريخ الفاتورة' : 'Invoice Date'} <span className="text-destructive">*</span>
+                    </Label>
+                    <Input
+                      type="date"
+                      value={formData.invoice_date}
+                      onChange={(e) => setFormData({ ...formData, invoice_date: e.target.value })}
+                    />
+                  </div>
+
                   {/* تاريخ الاستحقاق */}
                   <div>
                     <Label className="mb-2 block">{language === 'ar' ? 'تاريخ الاستحقاق' : 'Due Date'}</Label>
-                    <Input type="date" value={formData.due_date} onChange={(e) => setFormData({ ...formData, due_date: e.target.value })} />
+                    <Input
+                      type="date"
+                      min={formData.invoice_date}
+                      value={formData.due_date}
+                      onChange={(e) => setFormData({ ...formData, due_date: e.target.value })}
+                    />
                   </div>
                 </CardContent>
               </Card>
@@ -1242,7 +1270,7 @@ const SalesInvoiceForm = ({ isOpen, onClose, editInvoice }: SalesInvoiceFormProp
                   <div className="flex flex-col gap-3 pt-4">
                     <Button
                       onClick={() => handleSave('save')}
-                      disabled={items.length === 0 || !formData.customer_id || !formData.currency_id || !formData.tax_id || !formData.branch_id || !formData.warehouse_id || !formData.treasury_id}
+                      disabled={items.length === 0 || !formData.customer_id || !formData.currency_id || !formData.tax_id || !formData.branch_id || !formData.warehouse_id || !formData.treasury_id || !formData.invoice_date}
                       className="w-full gap-2 h-11 text-base"
                     >
                       <Save className="h-4 w-4" />
@@ -1251,7 +1279,7 @@ const SalesInvoiceForm = ({ isOpen, onClose, editInvoice }: SalesInvoiceFormProp
                     <Button
                       variant="outline"
                       onClick={() => handleSave('print')}
-                      disabled={items.length === 0 || !formData.customer_id || !formData.currency_id || !formData.tax_id || !formData.branch_id || !formData.warehouse_id || !formData.treasury_id}
+                      disabled={items.length === 0 || !formData.customer_id || !formData.currency_id || !formData.tax_id || !formData.branch_id || !formData.warehouse_id || !formData.treasury_id || !formData.invoice_date}
                       className="w-full gap-2 h-11"
                     >
                       <Printer className="h-4 w-4" />
@@ -1388,6 +1416,11 @@ const SalesInvoiceForm = ({ isOpen, onClose, editInvoice }: SalesInvoiceFormProp
                   <div style={{ display: "flex", justifyContent: "space-between" }}>
                     <span>{invoiceToPrint.invoice_number}</span>
                     <strong>رقم الفاتورة :</strong>
+                  </div>
+
+                  <div style={{ display: "flex", justifyContent: "space-between" }}>
+                    <span>{invoiceToPrint.invoice_date}</span>
+                    <strong>تاريخ الفاتورة :</strong>
                   </div>
 
                   <div style={{ display: "flex", justifyContent: "space-between" }}>

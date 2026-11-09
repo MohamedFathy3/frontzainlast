@@ -151,7 +151,7 @@ const InventoryCount = () => {
   const [dateFrom, setDateFrom] = useState<string>('');
   const [dateTo, setDateTo] = useState<string>('');
 
-  // ✅ NEW: وضع العرض فقط
+  // وضع العرض فقط
   const [isViewMode, setIsViewMode] = useState(false);
 
   // State لتعديل الـ variants (فقط لما المستخدم يعدّل)
@@ -260,8 +260,8 @@ const InventoryCount = () => {
             color_id: Number(color.color_id) || 0,
             color_name: color.color || '-',
             color_code: color.hex_code || '#ccc',
-            counted_stock: Number(color.warehouse_stock) || 0,
-            original_stock: Number(color.warehouse_stock) || 0,
+            counted_stock: Number(color.counted_stock ?? color.warehouse_stock) || 0,
+            original_stock: Number(color.system_stock ?? color.warehouse_stock) || 0,
           });
         });
       }
@@ -271,6 +271,17 @@ const InventoryCount = () => {
   }, [inventoryDetails]);
 
   const displayVariants = editVariants.length > 0 ? editVariants : initialEditVariants;
+
+  // ========== إجماليات الديالوج (بتتحدث وانت بتعدّل) ==========
+  const dlgSystem = displayVariants.length > 0
+    ? displayVariants.reduce((s, v) => s + (Number(v.original_stock) || 0), 0)
+    : Number(selectedRecord?.system_stock) || 0;
+
+  const dlgCounted = displayVariants.length > 0
+    ? displayVariants.reduce((s, v) => s + (Number(v.counted_stock) || 0), 0)
+    : Number(editCountedStock) || 0;
+
+  const dlgDiff = dlgCounted - dlgSystem;
 
   // ========== Company Info ==========
   const companyInfo = {
@@ -505,7 +516,7 @@ const InventoryCount = () => {
     setFilterValues({});
   };
 
-  // ✅ NEW: افتح السجل في وضع العرض أو التعديل
+  // افتح السجل في وضع العرض أو التعديل
   const handleOpenRecord = (record: InventoryRecord, viewOnly: boolean = false) => {
     setSelectedRecord(record);
     setEditCountedStock(record.counted_stock);
@@ -557,14 +568,6 @@ const InventoryCount = () => {
     });
   };
 
-  const calculateDifference = () => {
-    if (!selectedRecord) return 0;
-    return editCountedStock - selectedRecord.system_stock;
-  };
-
-  const difference = calculateDifference();
-  const isDifferent = difference !== 0;
-
   // ========== Flatten Products for Display ==========
   const flattenedProducts = useMemo(() => {
     if (!warehouseProducts.length) return [];
@@ -613,15 +616,41 @@ const InventoryCount = () => {
     return filtered;
   }, [inventoryRecords, warehouseFilter, productFilter]);
 
+  // تجميع سجلات نفس الفورم + نفس المنتج في صف واحد
+  const groupedInventoryRecords = useMemo(() => {
+    const map = new Map<string, any>();
+    filteredInventoryRecords.forEach((r: any) => {
+      const key = r.batch_id
+        ? `${r.batch_id}_${r.product?.id ?? r.product_id}`
+        : `single_${r.id}`;
+      const existing = map.get(key);
+      if (!existing) {
+        map.set(key, {
+          ...r,
+          system_stock: Number(r.system_stock) || 0,
+          counted_stock: Number(r.counted_stock) || 0,
+          difference: Number(r.difference) || 0,
+          variants_count: 1,
+        });
+      } else {
+        existing.system_stock += Number(r.system_stock) || 0;
+        existing.counted_stock += Number(r.counted_stock) || 0;
+        existing.difference += Number(r.difference) || 0;
+        existing.variants_count += 1;
+      }
+    });
+    return Array.from(map.values());
+  }, [filteredInventoryRecords]);
+
   // ========== Print & Export Functions ==========
   const preparePrintData = () => {
     const records = filteredInventoryRecords;
-    const totalSystemStock = records.reduce((sum, r) => sum + r.system_stock, 0);
-    const totalCountedStock = records.reduce((sum, r) => sum + r.counted_stock, 0);
+    const totalSystemStock = records.reduce((sum: number, r: InventoryRecord) => sum + r.system_stock, 0);
+    const totalCountedStock = records.reduce((sum: number, r: InventoryRecord) => sum + r.counted_stock, 0);
     const totalDifference = totalCountedStock - totalSystemStock;
-    const positiveVariance = records.filter(r => r.difference > 0).length;
-    const negativeVariance = records.filter(r => r.difference < 0).length;
-    const zeroVariance = records.filter(r => r.difference === 0).length;
+    const positiveVariance = records.filter((r: InventoryRecord) => r.difference > 0).length;
+    const negativeVariance = records.filter((r: InventoryRecord) => r.difference < 0).length;
+    const zeroVariance = records.filter((r: InventoryRecord) => r.difference === 0).length;
 
     return {
       records,
@@ -672,7 +701,7 @@ const InventoryCount = () => {
       return;
     }
 
-    const excelData = records.map((record, index) => ({
+    const excelData: any[] = records.map((record: InventoryRecord, index: number) => ({
       '#': index + 1,
       [t.product]: language === 'ar' ? record.product.name_ar || record.product.name : record.product.name,
       [t.sku]: record.product.sku,
@@ -684,12 +713,12 @@ const InventoryCount = () => {
       [t.date]: formatDate(record.created_at),
     }));
 
-    const totalSystemStock = records.reduce((sum, r) => sum + r.system_stock, 0);
-    const totalCountedStock = records.reduce((sum, r) => sum + r.counted_stock, 0);
+    const totalSystemStock = records.reduce((sum: number, r: InventoryRecord) => sum + r.system_stock, 0);
+    const totalCountedStock = records.reduce((sum: number, r: InventoryRecord) => sum + r.counted_stock, 0);
     const totalDifference = totalCountedStock - totalSystemStock;
-    const positiveVariance = records.filter(r => r.difference > 0).length;
-    const negativeVariance = records.filter(r => r.difference < 0).length;
-    const zeroVariance = records.filter(r => r.difference === 0).length;
+    const positiveVariance = records.filter((r: InventoryRecord) => r.difference > 0).length;
+    const negativeVariance = records.filter((r: InventoryRecord) => r.difference < 0).length;
+    const zeroVariance = records.filter((r: InventoryRecord) => r.difference === 0).length;
 
     excelData.push({
       '#': '', [t.product]: '=== ' + (language === 'ar' ? 'الملخص' : 'Summary') + ' ===',
@@ -850,7 +879,7 @@ const InventoryCount = () => {
                         </div>
                       </TableCell>
                     </TableRow>
-                  ) : filteredInventoryRecords.length === 0 ? (
+                  ) : groupedInventoryRecords.length === 0 ? (
                     <TableRow>
                       <TableCell colSpan={11} className="text-center py-8 text-muted-foreground">
                         <ClipboardList className="mx-auto h-12 w-12 mb-4 opacity-20" />
@@ -858,7 +887,7 @@ const InventoryCount = () => {
                       </TableCell>
                     </TableRow>
                   ) : (
-                    filteredInventoryRecords.map((record: InventoryRecord) => (
+                    groupedInventoryRecords.map((record: any) => (
                       <TableRow key={record.id}>
                         <TableCell className="font-medium">
                           INV-{formatDate(record.created_at).replace(/\//g, '')}-{record.warehouse?.id || record.warehouse_id}
@@ -873,6 +902,11 @@ const InventoryCount = () => {
                             </p>
                             <p className="text-xs text-muted-foreground">{record.product?.sku}</p>
                           </div>
+                          {record.variants_count > 1 && (
+                            <Badge variant="secondary" className="text-xs mt-1">
+                              {record.variants_count} {language === 'ar' ? 'مقاس/لون' : 'variants'}
+                            </Badge>
+                          )}
                         </TableCell>
                         <TableCell className="text-center font-medium">{record.system_stock}</TableCell>
                         <TableCell className="text-center font-medium">{record.counted_stock}</TableCell>
@@ -883,7 +917,7 @@ const InventoryCount = () => {
                         </TableCell>
                         <TableCell className="text-center">
                           <div className="flex items-center justify-center gap-1">
-                            {/* ✅ زرار التعديل → edit mode */}
+                            {/* زرار التعديل → edit mode */}
                             <Button
                               variant="ghost"
                               size="sm"
@@ -893,7 +927,7 @@ const InventoryCount = () => {
                             >
                               <Edit2 size={16} />
                             </Button>
-                            {/* ✅ زرار العرض → view only mode */}
+                            {/* زرار العرض → view only mode */}
                             <Button
                               variant="ghost"
                               size="sm"
@@ -958,24 +992,24 @@ const InventoryCount = () => {
               <div className="grid grid-cols-3 gap-2">
                 <div className="p-2 bg-gray-100 dark:bg-gray-800 rounded-lg text-center">
                   <p className="text-xs text-muted-foreground">{t.systemStock}</p>
-                  <p className="text-lg font-bold">{selectedRecord.system_stock}</p>
+                  <p className="text-lg font-bold">{dlgSystem}</p>
                 </div>
                 <div className="p-2 bg-blue-50 dark:bg-blue-950/30 rounded-lg text-center">
                   <p className="text-xs text-muted-foreground">{t.countedStock}</p>
-                  <p className="text-lg font-bold">{selectedRecord.counted_stock}</p>
+                  <p className="text-lg font-bold">{dlgCounted}</p>
                 </div>
                 <div className={cn(
                   "p-2 rounded-lg text-center",
-                  selectedRecord.difference > 0 ? "bg-green-100 dark:bg-green-950/30" :
-                    selectedRecord.difference < 0 ? "bg-red-100 dark:bg-red-950/30" : "bg-gray-100 dark:bg-gray-800"
+                  dlgDiff > 0 ? "bg-green-100 dark:bg-green-950/30" :
+                    dlgDiff < 0 ? "bg-red-100 dark:bg-red-950/30" : "bg-gray-100 dark:bg-gray-800"
                 )}>
                   <p className="text-xs text-muted-foreground">{t.difference}</p>
                   <p className={cn(
                     "text-lg font-bold",
-                    selectedRecord.difference > 0 ? "text-green-600" :
-                      selectedRecord.difference < 0 ? "text-red-600" : "text-gray-600"
+                    dlgDiff > 0 ? "text-green-600" :
+                      dlgDiff < 0 ? "text-red-600" : "text-gray-600"
                   )}>
-                    {selectedRecord.difference > 0 ? `+${selectedRecord.difference}` : selectedRecord.difference}
+                    {dlgDiff > 0 ? `+${dlgDiff}` : dlgDiff}
                   </p>
                 </div>
               </div>
@@ -990,9 +1024,7 @@ const InventoryCount = () => {
                     </Label>
                     <span className="text-xs font-medium">
                       {language === 'ar' ? 'المجموع: ' : 'Total: '}
-                      <b className="text-primary">
-                        {displayVariants.reduce((s, v) => s + (Number(v.counted_stock) || 0), 0)}
-                      </b>
+                      <b className="text-primary">{dlgCounted}</b>
                     </span>
                   </div>
                   <div className="border rounded-lg divide-y max-h-[250px] overflow-y-auto bg-card">
@@ -1009,7 +1041,7 @@ const InventoryCount = () => {
                           {language === 'ar' ? 'مخزون النظام: ' : 'System: '}
                           <b>{v.original_stock}</b>
                         </div>
-                        {/* ✅ Input معطّل في وضع العرض فقط */}
+                        {/* Input معطّل في وضع العرض فقط */}
                         <Input
                           type="number"
                           min="0"
@@ -1035,7 +1067,6 @@ const InventoryCount = () => {
               ) : (
                 <div className="space-y-2 mt-4">
                   <Label>{t.countedStock}</Label>
-                  {/* ✅ Input معطّل في وضع العرض فقط */}
                   <Input
                     type="number"
                     min="0"
@@ -1056,7 +1087,6 @@ const InventoryCount = () => {
               {/* ملاحظات */}
               <div className="space-y-2 mt-4">
                 <Label>{t.notes}</Label>
-                {/* ✅ Textarea معطّل في وضع العرض فقط */}
                 <Textarea
                   value={editNote}
                   onChange={(e) => {
@@ -1073,7 +1103,7 @@ const InventoryCount = () => {
           ) : null}
 
           <DialogFooter className="p-4 border-t gap-2">
-            {/* ✅ في وضع العرض: زرار إغلاق فقط */}
+            {/* في وضع العرض: زرار إغلاق فقط */}
             {isViewMode ? (
               <Button variant="outline" onClick={() => setEditRecordOpen(false)}>
                 {t.close}

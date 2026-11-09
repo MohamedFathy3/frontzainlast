@@ -17,7 +17,7 @@ export const PAGES: PagePermission[] = [
     label: 'Dashboard',
     labelAr: 'لوحة التحكم',
     icon: 'LayoutDashboard',
-    allowedRoles: ['admin',  'Manager', 'Accountant', 'Sales', 'purchasing', 'warehouse', 'viewer'],
+    allowedRoles: ['admin', 'Manager', 'Accountant', 'Sales', 'purchasing', 'warehouse', 'viewer'],
   },
   {
     id: 'pos',
@@ -27,12 +27,12 @@ export const PAGES: PagePermission[] = [
     icon: 'ShoppingCart',
     allowedRoles: ['admin', 'Cashier', 'Manager', 'Sales'],
   },
-    {
+  {
     id: 'posreturn',
     path: '/POSRetrun',
     label: 'POS Return',
-    labelAr: 'إرجاع نقاط البيع',
-    icon: 'RotateCcw',
+    labelAr: 'مرتجع نقاط البيع',
+    icon: 'RefreshCcw',
     allowedRoles: ['admin', 'Cashier', 'Manager', 'Sales'],
   },
   {
@@ -47,7 +47,7 @@ export const PAGES: PagePermission[] = [
     id: 'sales',
     path: '/sales',
     label: 'Advanced Sales',
-    labelAr: 'مبيعات متقدمة',
+    labelAr: 'المبيعات المتقدمة',
     icon: 'Receipt',
     allowedRoles: ['admin', 'Manager', 'Sales', 'Cashier', 'Accountant'],
   },
@@ -113,10 +113,10 @@ export const PAGES: PagePermission[] = [
 export const canAccessPage = (role: UserRole | undefined, path: string): boolean => {
   if (!role) return false;
   if (role === 'admin') return true; // الأدمن كل حاجة
-  
+
   const page = PAGES.find(p => p.path === path);
   if (!page) return false;
-  
+
   return page.allowedRoles.includes(role);
 };
 
@@ -124,6 +124,6 @@ export const canAccessPage = (role: UserRole | undefined, path: string): boolean
 export const getAllowedPages = (role: UserRole | undefined): PagePermission[] => {
   if (!role) return [];
   if (role === 'admin') return PAGES; // الأدمن كل حاجة
-  
+
   return PAGES.filter(page => page.allowedRoles.includes(role));
 };
