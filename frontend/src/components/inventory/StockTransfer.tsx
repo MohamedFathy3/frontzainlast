@@ -140,6 +140,7 @@ const StockTransfer = () => {
   const [warehouseFilter, setWarehouseFilter] = useState<string>('all');
   const [transferItems, setTransferItems] = useState<TransferProduct[]>([]);
   const [productNotes, setProductNotes] = useState<Record<string, string>>({});
+  const [recentTransferProductIds, setRecentTransferProductIds] = useState<number[]>([]);
 
   // ========== Translation ==========
   const t = {
@@ -317,6 +318,22 @@ const StockTransfer = () => {
     return { totalItems, totalStock };
   }, [products]);
 
+  const displayedProducts = useMemo(() => {
+    if (recentTransferProductIds.length === 0) return products;
+
+    const recentRank = new Map(
+      recentTransferProductIds.map((productId, index) => [productId, index]),
+    );
+
+    return [...products].sort((a: WarehouseProduct, b: WarehouseProduct) => {
+      const aId = Number(a.product_id || a.product?.id || a.id);
+      const bId = Number(b.product_id || b.product?.id || b.id);
+      const aRank = recentRank.get(aId) ?? Number.MAX_SAFE_INTEGER;
+      const bRank = recentRank.get(bId) ?? Number.MAX_SAFE_INTEGER;
+      return aRank - bRank;
+    });
+  }, [products, recentTransferProductIds]);
+
   // ========== 5. تحويل منتجات ==========
   const transferMutation = useMutation({
     mutationFn: async () => {
@@ -369,6 +386,9 @@ const StockTransfer = () => {
         }),
       ]);
 
+      setRecentTransferProductIds([
+        ...new Set(transferItems.map((item) => item.product_id)),
+      ]);
       setShowTransferModal(false);
       setTransferItems([]);
       setProductNotes({});
@@ -552,7 +572,7 @@ const StockTransfer = () => {
       return;
     }
 
-    const exportData = products.map((item: WarehouseProduct) => ({
+    const exportData = displayedProducts.map((item: WarehouseProduct) => ({
       ...(language === 'ar'
         ? {
             المنتج: item.product_name || item.name || '-',
@@ -820,7 +840,7 @@ const StockTransfer = () => {
                       </TableCell>
                     </TableRow>
                   ) : (
-                    products.map((item: WarehouseProduct) => {
+                    displayedProducts.map((item: WarehouseProduct) => {
                       // ✅ الرصيد الفعلي بدل item.stock
                       const effective = computeEffectiveStock(item);
 
