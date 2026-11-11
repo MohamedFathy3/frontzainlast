@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef } from 'react';
 import { useLanguage } from '@/contexts/LanguageContext';
+import { useAuth } from '@/contexts/AuthContext';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -15,6 +16,7 @@ import { toast } from '@/hooks/use-toast';
 import api from '@/lib/api';
 import { AxiosError } from 'axios';
 import * as XLSX from 'xlsx';
+import { useReactToPrint } from 'react-to-print';
 import {
   Plus,
   Search,
@@ -34,6 +36,7 @@ import {
   ChevronsUpDown,
   Eye,
   List,
+  Printer,
 } from 'lucide-react';
 
 // ========== أنواع البيانات ==========
@@ -205,8 +208,226 @@ const buildTransferNumberPrefix = (date: Date = new Date()): string => {
   return `WHS-${dd}${mm}${yyyy}-`;
 };
 
+// ========== قالب طباعة مستند التحويل ==========
+interface TransferPrintProps {
+  details: TransferHistoryDetails;
+  language: string;
+  fromName: string;
+  toName: string;
+  companyName?: string;
+}
+
+const TransferPrintTemplate = React.forwardRef<HTMLDivElement, TransferPrintProps>(
+  ({ details, language, fromName, toName, companyName }, ref) => {
+    const isAr = language === 'ar';
+    const L = (ar: string, en: string) => (isAr ? ar : en);
+    const locale = isAr ? 'ar-EG' : 'en-US';
+    const items = details.items || [];
+    const transfer = details.transfer || ({} as any);
+
+    const totalQty = Number(
+      details.total_quantity ?? items.reduce((s, i) => s + (Number(i.quantity) || 0), 0),
+    );
+    const totalValue = Number(
+      details.inventory_value ??
+      transfer.inventory_value ??
+      items.reduce((s, i) => s + (Number(i.total_cost) || 0), 0),
+    );
+    const fmtMoney = (n: number | string | undefined) =>
+      Number(n || 0).toLocaleString(locale, {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      });
+
+    const th: React.CSSProperties = {
+      border: '1px solid #444',
+      padding: '5px 4px',
+      background: '#f1f1f1',
+      fontSize: 11,
+      textAlign: 'center',
+    };
+    const td: React.CSSProperties = {
+      border: '1px solid #444',
+      padding: '5px 4px',
+      fontSize: 11,
+      textAlign: 'center',
+    };
+    const metaLabel: React.CSSProperties = { fontSize: 11, color: '#555' };
+    const metaValue: React.CSSProperties = { fontSize: 13, fontWeight: 700 };
+
+    return (
+      <div
+        ref={ref}
+        dir={isAr ? 'rtl' : 'ltr'}
+        style={{
+          fontFamily: 'Tahoma, Arial, sans-serif',
+          color: '#000',
+          background: '#fff',
+          padding: 24,
+          width: '100%',
+        }}
+      >
+        <style>{`
+          @page { size: A4 landscape; margin: 10mm; }
+          @media print { body { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
+        `}</style>
+
+        {/* العنوان */}
+        <div style={{ textAlign: 'center', marginBottom: 14 }}>
+          {companyName && (
+            <div style={{ fontSize: 16, fontWeight: 700 }}>{companyName}</div>
+          )}
+          <div style={{ fontSize: 20, fontWeight: 800, marginTop: 4 }}>
+            {L('مستند تحويل بين المخازن', 'Warehouse Transfer Document')}
+          </div>
+        </div>
+
+        {/* بيانات المستند */}
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(4, 1fr)',
+            gap: 10,
+            border: '1px solid #444',
+            padding: 10,
+            marginBottom: 14,
+          }}
+        >
+          <div>
+            <div style={metaLabel}>{L('رقم التحويل', 'Transfer Number')}</div>
+            <div style={{ ...metaValue, fontFamily: 'monospace' }}>
+              {transfer.transfer_number || '-'}
+            </div>
+          </div>
+          <div>
+            <div style={metaLabel}>{L('تاريخ التحويل', 'Transfer Date')}</div>
+            <div style={metaValue}>
+              {transfer.transfer_date
+                ? new Date(transfer.transfer_date).toLocaleString(locale)
+                : '-'}
+            </div>
+          </div>
+          <div>
+            <div style={metaLabel}>{L('من مخزن', 'From Warehouse')}</div>
+            <div style={metaValue}>{fromName || '-'}</div>
+          </div>
+          <div>
+            <div style={metaLabel}>{L('إلى مخزن', 'To Warehouse')}</div>
+            <div style={metaValue}>{toName || '-'}</div>
+          </div>
+          <div>
+            <div style={metaLabel}>{L('منشئ المستند', 'Created By')}</div>
+            <div style={metaValue}>{transfer.creator_name || '-'}</div>
+          </div>
+          <div>
+            <div style={metaLabel}>{L('إجمالي الأصناف', 'Total Items')}</div>
+            <div style={metaValue}>{details.items_count ?? items.length}</div>
+          </div>
+          <div>
+            <div style={metaLabel}>{L('إجمالي الكمية', 'Total Quantity')}</div>
+            <div style={metaValue}>{totalQty}</div>
+          </div>
+          <div>
+            <div style={metaLabel}>{L('إجمالي القيمة', 'Total Value')}</div>
+            <div style={metaValue}>{fmtMoney(totalValue)}</div>
+          </div>
+        </div>
+
+        {/* جدول الأصناف */}
+        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <thead>
+            <tr>
+              <th style={th}>#</th>
+              <th style={th}>{L('المنتج', 'Product')}</th>
+              <th style={th}>{L('الوحدة', 'Unit')}</th>
+              <th style={th}>{L('اللون', 'Color')}</th>
+              <th style={th}>{L('الباركود', 'Barcode')}</th>
+              <th style={th}>{L('الكمية', 'Qty')}</th>
+              <th style={th}>{L('تكلفة الوحدة', 'Unit Cost')}</th>
+              <th style={th}>{L('الإجمالي', 'Total')}</th>
+              <th style={th}>{L('رصيد المصدر', 'Source Balance')}</th>
+              <th style={th}>{L('رصيد الوجهة', 'Destination Balance')}</th>
+              <th style={th}>{L('ملاحظة', 'Note')}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {items.map((item, idx) => (
+              <tr key={item.id || idx} style={{ pageBreakInside: 'avoid' }}>
+                <td style={td}>{idx + 1}</td>
+                <td style={{ ...td, textAlign: isAr ? 'right' : 'left' }}>
+                  {item.product_name || `#${item.product_id}`}
+                </td>
+                <td style={td}>{item.unit_name || '-'}</td>
+                <td style={td}>{item.color_name || '-'}</td>
+                <td style={{ ...td, fontFamily: 'monospace' }}>
+                  {item.unit_barcode || item.product_barcode || '-'}
+                </td>
+                <td style={{ ...td, fontWeight: 700 }}>{item.quantity}</td>
+                <td style={td}>{fmtMoney(item.unit_cost)}</td>
+                <td style={td}>{fmtMoney(item.total_cost)}</td>
+                <td style={td}>
+                  {item.source_before} → <b>{item.source_after}</b>
+                </td>
+                <td style={td}>
+                  {item.destination_before} → <b>{item.destination_after}</b>
+                </td>
+                <td style={td}>{item.note || '-'}</td>
+              </tr>
+            ))}
+            <tr>
+              <td style={{ ...td, fontWeight: 700, background: '#f7f7f7' }} colSpan={5}>
+                {L('الإجمالي', 'Total')}
+              </td>
+              <td style={{ ...td, fontWeight: 700, background: '#f7f7f7' }}>{totalQty}</td>
+              <td style={{ ...td, background: '#f7f7f7' }}></td>
+              <td style={{ ...td, fontWeight: 700, background: '#f7f7f7' }}>
+                {fmtMoney(totalValue)}
+              </td>
+              <td style={{ ...td, background: '#f7f7f7' }} colSpan={3}></td>
+            </tr>
+          </tbody>
+        </table>
+
+        {/* التوقيعات */}
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(3, 1fr)',
+            gap: 30,
+            marginTop: 50,
+            fontSize: 12,
+            textAlign: 'center',
+          }}
+        >
+          <div>
+            <div style={{ borderTop: '1px solid #444', paddingTop: 6 }}>
+              {L('أمين المخزن (المُسلِّم)', 'Sender (Storekeeper)')}
+            </div>
+          </div>
+          <div>
+            <div style={{ borderTop: '1px solid #444', paddingTop: 6 }}>
+              {L('أمين المخزن (المُستلِم)', 'Receiver (Storekeeper)')}
+            </div>
+          </div>
+          <div>
+            <div style={{ borderTop: '1px solid #444', paddingTop: 6 }}>
+              {L('اعتماد المدير', 'Manager Approval')}
+            </div>
+          </div>
+        </div>
+
+        <div style={{ marginTop: 18, fontSize: 10, color: '#777', textAlign: 'center' }}>
+          {L('تاريخ الطباعة', 'Printed at')}: {new Date().toLocaleString(locale)}
+        </div>
+      </div>
+    );
+  },
+);
+TransferPrintTemplate.displayName = 'TransferPrintTemplate';
+
 const StockTransfer = () => {
   const { language } = useLanguage();
+  const { user } = useAuth();
   const queryClient = useQueryClient();
 
   // ========== State ==========
@@ -228,6 +449,9 @@ const StockTransfer = () => {
   const [showHistoryDetailsModal, setShowHistoryDetailsModal] = useState(false);
   const [collapsedProducts, setCollapsedProducts] = useState<Set<number>>(new Set());
 
+  // الطباعة
+  const printRef = useRef<HTMLDivElement>(null);
+
   // ========== Translation ==========
   const t = {
     en: {
@@ -244,6 +468,8 @@ const StockTransfer = () => {
       newTransfer: 'New Transfer',
       saveTransfer: 'Transfer Now',
       cancel: 'Cancel',
+      close: 'Close',
+      print: 'Print',
       selectFrom: 'Select source',
       selectTo: 'Select destination',
       search: 'Search by name or barcode...',
@@ -294,6 +520,8 @@ const StockTransfer = () => {
       newTransfer: 'تحويل جديد',
       saveTransfer: 'تحويل الآن',
       cancel: 'إلغاء',
+      close: 'إغلاق',
+      print: 'طباعة',
       selectFrom: 'اختر المصدر',
       selectTo: 'اختر الوجهة',
       search: 'ابحث بالاسم أو الباركود...',
@@ -380,6 +608,12 @@ const StockTransfer = () => {
   });
 
   const historyDetails = historyDetailsResponse;
+
+  // ========== طباعة مستند التحويل المعروض ==========
+  const handlePrintHistory = useReactToPrint({
+    contentRef: printRef,
+    documentTitle: `warehouse-transfer-${historyDetails?.transfer?.transfer_number || 'document'}`,
+  });
 
   // ========== 2. جلب المنتجات (الواجهة الرئيسية) ==========
   const { data: products = [], isLoading, refetch } = useQuery({
@@ -1160,53 +1394,7 @@ const StockTransfer = () => {
         </Card>
       )}
 
-      {/* ===== الفلاتر ===== */}
-      {/* <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="text-base flex items-center gap-2">
-            <Filter className="h-4 w-4" />
-            {t.filter}
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="flex flex-col gap-3 lg:flex-row">
-            <div className="flex-1">
-              <Select
-                value={warehouseFilter}
-                onValueChange={setWarehouseFilter}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder={t.allWarehouses} />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">{t.allWarehouses}</SelectItem>
-                  {warehouses.map((w: Warehouse) => (
-                    <SelectItem key={w.id} value={w.id.toString()}>
-                      {language === 'ar' ? w.name_ar || w.name : w.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="flex-1 relative">
-              <Search className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <Input
-                placeholder={t.search}
-                value={searchText}
-                onChange={(e) => {
-                  setSearchText(e.target.value);
-                  const timeoutId = setTimeout(() => refetch(), 500);
-                  return () => clearTimeout(timeoutId);
-                }}
-                className="pr-9"
-              />
-            </div>
-            <Button variant="outline" size="icon" onClick={handleResetFilters}>
-              <X className="h-4 w-4" />
-            </Button>
-          </div>
-        </CardContent>
-      </Card> */}
+
 
       {/* ===== سجل مستندات تحويل المخازن ===== */}
       <Card>
@@ -1829,9 +2017,44 @@ const StockTransfer = () => {
               </div>
             </div>
           ) : <div className="py-10 text-center text-muted-foreground">{language === 'ar' ? 'تعذر تحميل تفاصيل المستند' : 'Could not load document details'}</div>}
-          <DialogFooter><Button variant="outline" onClick={() => { setShowHistoryDetailsModal(false); setSelectedHistoryTransferId(null); }}>{t.cancel}</Button></DialogFooter>
+          <DialogFooter className="gap-2">
+            <Button
+              variant="outline"
+              className="gap-2 me-auto"
+              onClick={() => handlePrintHistory()}
+              disabled={historyDetailsLoading || !historyDetails || (historyDetails.items || []).length === 0}
+            >
+              <Printer className="h-4 w-4" />
+              {t.print}
+            </Button>
+            <Button variant="outline" onClick={() => { setShowHistoryDetailsModal(false); setSelectedHistoryTransferId(null); }}>{t.close}</Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* قالب الطباعة (مخفي - بيتطبع بزرار الطباعة) */}
+      {showHistoryDetailsModal && historyDetails && (
+        <div style={{ display: 'none' }}>
+          <TransferPrintTemplate
+            ref={printRef}
+            details={historyDetails}
+            language={language}
+            fromName={
+              historyDetails.transfer?.source_warehouse_name ||
+              getWarehouseName(historyDetails.transfer?.from_warehouse_id)
+            }
+            toName={
+              historyDetails.transfer?.destination_warehouse_name ||
+              getWarehouseName(historyDetails.transfer?.to_warehouse_id)
+            }
+            companyName={
+              language === 'ar'
+                ? (user as any)?.company_name_ar || (user as any)?.company_name
+                : (user as any)?.company_name
+            }
+          />
+        </div>
+      )}
 
       {/* ✅ النافذة المنبثقة (Popup) لعرض تفاصيل التحويل بالكامل */}
       <Dialog open={showDetailsModal} onOpenChange={setShowDetailsModal}>

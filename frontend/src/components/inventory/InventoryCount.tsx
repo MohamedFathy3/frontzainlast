@@ -13,7 +13,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { ScrollArea, ScrollBar } from '@/components/ui/scroll-area';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useMutation } from '@tanstack/react-query';
 import { cn, formatDate } from '@/lib/utils';
 import api from '@/lib/api';
 import { useInventory } from '@/hooks/useInventory';
@@ -25,7 +25,6 @@ import type {
   Warehouse,
   Product,
   WarehouseProduct,
-  InventoryRecord,
   CountedProduct,
   ProductUnit,
   UnitColor
@@ -132,41 +131,28 @@ const getProductUniqueKey = (product: CountedProduct): string => {
 const InventoryCount = () => {
   const { language } = useLanguage();
   const { user } = useAuth();
-  const { useGetAll, useGetById, useCreate, useUpdate } = useInventory();
+  const { useCreate } = useInventory();
 
   // ========== State ==========
   const [newCountOpen, setNewCountOpen] = useState(false);
   const [selectedWarehouse, setSelectedWarehouse] = useState('');
   const [countNotes, setCountNotes] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
-  const [filterValues, setFilterValues] = useState<any>({});
   const [countedProducts, setCountedProducts] = useState<CountedProduct[]>([]);
-  const [editRecordOpen, setEditRecordOpen] = useState(false);
-  const [selectedRecord, setSelectedRecord] = useState<InventoryRecord | null>(null);
-  const [editCountedStock, setEditCountedStock] = useState(0);
-  const [editNote, setEditNote] = useState('');
-  const [updateStock, setUpdateStock] = useState(false);
   const [warehouseFilter, setWarehouseFilter] = useState<string>('all');
   const [productFilter, setProductFilter] = useState<string>('all');
   const [dateFrom, setDateFrom] = useState<string>('');
   const [dateTo, setDateTo] = useState<string>('');
 
-  // وضع العرض فقط
+  // ديالوج التفاصيل / التعديل
+  const [editRecordOpen, setEditRecordOpen] = useState(false);
   const [isViewMode, setIsViewMode] = useState(false);
+  const [selectedCountId, setSelectedCountId] = useState<number | null>(null);
+  const [editNote, setEditNote] = useState('');
+  // التعديلات المحلية: { [lineId]: counted_stock }
+  const [editLines, setEditLines] = useState<Record<number, number>>({});
 
-  // State لتعديل الـ variants (فقط لما المستخدم يعدّل)
-  const [editVariants, setEditVariants] = useState<Array<{
-    product_unit_id: number;
-    unit_id: number;
-    unit_name: string;
-    color_id: number;
-    color_name: string;
-    color_code: string;
-    counted_stock: number;
-    original_stock: number;
-  }>>([]);
-
-  // State للطباعة
+  // الطباعة
   const printRef = useRef<HTMLDivElement>(null);
   const [showPrint, setShowPrint] = useState(false);
   const [printData, setPrintData] = useState<any>(null);
@@ -210,77 +196,57 @@ const InventoryCount = () => {
     }
   });
 
-  const { data: inventoryRecords = [], isLoading: recordsLoading, refetch: refetchRecords } = useGetAll({
-    warehouse_id: warehouseFilter !== 'all' ? parseInt(warehouseFilter) : undefined,
-    product_id: productFilter !== 'all' ? parseInt(productFilter) : undefined,
-    date_from: dateFrom || undefined,
-    date_to: dateTo || undefined
+  // مستندات الجرد (صف واحد لكل عملية جرد)
+  const { data: counts = [], isLoading, refetch: refetchRecords } = useQuery({
+    queryKey: ['inventory-counts', warehouseFilter, productFilter, dateFrom, dateTo],
+    queryFn: async () => {
+      const r = await api.post('/inventory-counts/index', {
+        paginate: false,
+        filters: {
+          warehouse_id: warehouseFilter !== 'all' ? warehouseFilter : undefined,
+          product_id: productFilter !== 'all' ? productFilter : undefined,
+          date_from: dateFrom || undefined,
+          date_to: dateTo || undefined
+        }
+      });
+      return r.data?.data || [];
+    }
   });
 
-  const { data: inventoryDetails, isLoading: detailsLoading } = useGetById(selectedRecord?.id || null, editRecordOpen);
+  // تفاصيل مستند الجرد المفتوح
+  const { data: countDetails, isLoading: detailsLoading } = useQuery({
+    queryKey: ['inventory-count', selectedCountId],
+    queryFn: async () => (await api.get(`/inventory-counts/${selectedCountId}`)).data.data,
+    enabled: !!selectedCountId && editRecordOpen
+  });
 
   // ========== Mutations ==========
   const createMutation = useCreate();
-  const updateMutation = useUpdate();
 
-  // ========== Initial Variants (sync via useMemo) ==========
-  const initialEditVariants = useMemo(() => {
-    const d: any = inventoryDetails;
-    if (!d) return [];
+  const saveMutation = useMutation({
+    mutationFn: () =>
+      api.put(`/inventory-counts/${selectedCountId}`, {
+        note: editNote,
+        lines: lines.map((l: any) => ({ id: l.id, counted_stock: counted(l) }))
+      }),
+    onSuccess: () => {
+      toast({ title: t.success, description: t.countSaved });
+      closeDetailsDialog();
+      refetchRecords();
+    },
+    onError: (e: any) =>
+      toast({
+        title: t.error,
+        description: e?.response?.data?.message || 'Error',
+        variant: 'destructive'
+      })
+  });
 
-    const candidates = [
-      d?.product?.units,
-      d?.data?.product?.units,
-      d?.data?.data?.product?.units,
-      d?.units,
-      d?.data?.units,
-    ];
-
-    const units = candidates.find((c) => Array.isArray(c) && c.length > 0) ?? [];
-    if (units.length === 0) return [];
-
-    const flat: Array<{
-      product_unit_id: number;
-      unit_id: number;
-      unit_name: string;
-      color_id: number;
-      color_name: string;
-      color_code: string;
-      counted_stock: number;
-      original_stock: number;
-    }> = [];
-
-    units.forEach((unit: any) => {
-      if (Array.isArray(unit.colors)) {
-        unit.colors.forEach((color: any) => {
-          flat.push({
-            product_unit_id: Number(unit.id) || 0,
-            unit_id: Number(unit.unit_id) || 0,
-            unit_name: unit.unit_name || '-',
-            color_id: Number(color.color_id) || 0,
-            color_name: color.color || '-',
-            color_code: color.hex_code || '#ccc',
-            counted_stock: Number(color.counted_stock ?? color.warehouse_stock) || 0,
-            original_stock: Number(color.system_stock ?? color.warehouse_stock) || 0,
-          });
-        });
-      }
-    });
-
-    return flat;
-  }, [inventoryDetails]);
-
-  const displayVariants = editVariants.length > 0 ? editVariants : initialEditVariants;
-
-  // ========== إجماليات الديالوج (بتتحدث وانت بتعدّل) ==========
-  const dlgSystem = displayVariants.length > 0
-    ? displayVariants.reduce((s, v) => s + (Number(v.original_stock) || 0), 0)
-    : Number(selectedRecord?.system_stock) || 0;
-
-  const dlgCounted = displayVariants.length > 0
-    ? displayVariants.reduce((s, v) => s + (Number(v.counted_stock) || 0), 0)
-    : Number(editCountedStock) || 0;
-
+  // ========== سطور الديالوج + الإجماليات (بتتحدث وانت بتعدّل) ==========
+  const lines: any[] = countDetails?.lines || [];
+  const counted = (l: any): number => editLines[l.id] ?? l.counted_stock;
+  const dlgSystem = lines.reduce((s, l) => s + (Number(l.system_stock) || 0), 0);
+  const dlgCounted = lines.reduce((s, l) => s + (Number(counted(l)) || 0), 0);
   const dlgDiff = dlgCounted - dlgSystem;
 
   // ========== Company Info ==========
@@ -456,8 +422,8 @@ const InventoryCount = () => {
   }[language];
 
   // ========== Helper Functions ==========
-  const getStatusBadge = (record: InventoryRecord) => {
-    const diff = record.difference;
+  const getStatusBadge = (record: { difference: number }) => {
+    const diff = Number(record.difference) || 0;
     if (diff > 0) {
       return (
         <Badge variant="outline" className="gap-1 bg-green-100 text-green-700 border-green-200">
@@ -513,59 +479,22 @@ const InventoryCount = () => {
     setProductFilter('all');
     setDateFrom('');
     setDateTo('');
-    setFilterValues({});
   };
 
-  // افتح السجل في وضع العرض أو التعديل
-  const handleOpenRecord = (record: InventoryRecord, viewOnly: boolean = false) => {
-    setSelectedRecord(record);
-    setEditCountedStock(record.counted_stock);
-    setEditNote(record.note || '');
-    setUpdateStock(false);
-    setEditVariants([]);
+  // افتح مستند الجرد في وضع العرض أو التعديل
+  const handleOpenRecord = (rec: any, viewOnly: boolean = false) => {
+    setSelectedCountId(rec.id);
+    setEditLines({});
+    setEditNote(rec.note || '');
     setIsViewMode(viewOnly);
     setEditRecordOpen(true);
   };
 
-  const handleSaveEdit = () => {
-    if (!selectedRecord || isViewMode) return;
-
-    // لو المنتج عنده ألوان → ابعت variants
-    if (displayVariants.length > 0) {
-      updateMutation.mutate({
-        id: selectedRecord.id,
-        data: {
-          variants: displayVariants.map(v => ({
-            product_unit_id: v.product_unit_id,
-            color_id: v.color_id,
-            counted_stock: v.counted_stock,
-          })),
-          note: editNote,
-        } as any,
-      }, {
-        onSuccess: () => {
-          setEditRecordOpen(false);
-          setSelectedRecord(null);
-          setEditVariants([]);
-          setIsViewMode(false);
-          refetchRecords();
-        },
-      });
-      return;
-    }
-
-    // منتج بدون ألوان → counted_stock
-    updateMutation.mutate({
-      id: selectedRecord.id,
-      data: { counted_stock: editCountedStock, note: editNote },
-    }, {
-      onSuccess: () => {
-        setEditRecordOpen(false);
-        setSelectedRecord(null);
-        setIsViewMode(false);
-        refetchRecords();
-      },
-    });
+  const closeDetailsDialog = () => {
+    setEditRecordOpen(false);
+    setSelectedCountId(null);
+    setEditLines({});
+    setIsViewMode(false);
   };
 
   // ========== Flatten Products for Display ==========
@@ -605,68 +534,54 @@ const InventoryCount = () => {
     });
   }, [countedProducts, flattenedProducts]);
 
-  const filteredInventoryRecords = useMemo(() => {
-    let filtered = inventoryRecords || [];
-    if (warehouseFilter !== 'all') {
-      filtered = filtered.filter((r: InventoryRecord) => r.warehouse?.id === parseInt(warehouseFilter));
-    }
-    if (productFilter !== 'all') {
-      filtered = filtered.filter((r: InventoryRecord) => r.product?.id === parseInt(productFilter));
-    }
-    return filtered;
-  }, [inventoryRecords, warehouseFilter, productFilter]);
-
-  // تجميع سجلات نفس الفورم + نفس المنتج في صف واحد
-  const groupedInventoryRecords = useMemo(() => {
-    const map = new Map<string, any>();
-    filteredInventoryRecords.forEach((r: any) => {
-      const key = r.batch_id
-        ? `${r.batch_id}_${r.product?.id ?? r.product_id}`
-        : `single_${r.id}`;
-      const existing = map.get(key);
-      if (!existing) {
-        map.set(key, {
-          ...r,
-          system_stock: Number(r.system_stock) || 0,
-          counted_stock: Number(r.counted_stock) || 0,
-          difference: Number(r.difference) || 0,
-          variants_count: 1,
-        });
-      } else {
-        existing.system_stock += Number(r.system_stock) || 0;
-        existing.counted_stock += Number(r.counted_stock) || 0;
-        existing.difference += Number(r.difference) || 0;
-        existing.variants_count += 1;
-      }
-    });
-    return Array.from(map.values());
-  }, [filteredInventoryRecords]);
-
   // ========== Print & Export Functions ==========
-  const preparePrintData = () => {
-    const records = filteredInventoryRecords;
-    const totalSystemStock = records.reduce((sum: number, r: InventoryRecord) => sum + r.system_stock, 0);
-    const totalCountedStock = records.reduce((sum: number, r: InventoryRecord) => sum + r.counted_stock, 0);
-    const totalDifference = totalCountedStock - totalSystemStock;
-    const positiveVariance = records.filter((r: InventoryRecord) => r.difference > 0).length;
-    const negativeVariance = records.filter((r: InventoryRecord) => r.difference < 0).length;
-    const zeroVariance = records.filter((r: InventoryRecord) => r.difference === 0).length;
 
+  // يجيب كل سطور كل مستند ويحوّلها لشكل سجلات مسطحة (متوافق مع قالب الطباعة)
+  const fetchLineRecords = async (): Promise<any[]> => {
+    const details = await Promise.all(
+      counts.map((c: any) =>
+        api.get(`/inventory-counts/${c.id}`).then((r) => r.data?.data)
+      )
+    );
+
+    return details.flatMap((d: any) =>
+      (d?.lines || []).map((l: any) => {
+        const baseName = language === 'ar' ? l.product_name_ar || l.product_name : l.product_name;
+        const fullName =
+          `${baseName || ''}` +
+          (l.unit_name ? ` (${l.unit_name})` : '') +
+          (l.color_name ? ` - ${l.color_name}` : '');
+
+        return {
+          id: l.id,
+          count_id: d.id,
+          product: {
+            id: l.product_id,
+            name: fullName,
+            name_ar: fullName,
+            sku: l.sku
+          },
+          warehouse: d.warehouse,
+          system_stock: Number(l.system_stock) || 0,
+          counted_stock: Number(l.counted_stock) || 0,
+          difference: Number(l.difference) || 0,
+          note: d.note,
+          created_at: d.created_at
+        };
+      })
+    );
+  };
+
+  const buildSummary = (records: any[]) => {
+    const totalSystemStock = records.reduce((s, r) => s + r.system_stock, 0);
+    const totalCountedStock = records.reduce((s, r) => s + r.counted_stock, 0);
     return {
-      records,
-      warehouseName: warehouseFilter !== 'all'
-        ? warehouses.find((w: Warehouse) => w.id === parseInt(warehouseFilter))?.name
-        : undefined,
-      dateFrom: dateFrom || undefined,
-      dateTo: dateTo || undefined,
-      createdAt: new Date().toISOString(),
-      totalRecords: records.length,
       totalSystemStock,
       totalCountedStock,
-      totalDifference,
-      positiveVariance,
-      negativeVariance,
-      zeroVariance,
+      totalDifference: totalCountedStock - totalSystemStock,
+      positiveVariance: records.filter((r) => r.difference > 0).length,
+      negativeVariance: records.filter((r) => r.difference < 0).length,
+      zeroVariance: records.filter((r) => r.difference === 0).length
     };
   };
 
@@ -676,8 +591,8 @@ const InventoryCount = () => {
     onAfterPrint: () => setShowPrint(false),
   });
 
-  const handlePrintClick = () => {
-    if (filteredInventoryRecords.length === 0) {
+  const handlePrintClick = async () => {
+    if (counts.length === 0) {
       toast({
         title: t.error,
         description: language === 'ar' ? 'لا توجد بيانات للطباعة' : 'No data to print',
@@ -685,14 +600,88 @@ const InventoryCount = () => {
       });
       return;
     }
-    setPrintData(preparePrintData());
+
+    try {
+      const records = await fetchLineRecords();
+
+      setPrintData({
+        records,
+        warehouseName: warehouseFilter !== 'all'
+          ? warehouses.find((w: Warehouse) => w.id === parseInt(warehouseFilter))?.name
+          : undefined,
+        dateFrom: dateFrom || undefined,
+        dateTo: dateTo || undefined,
+        createdAt: new Date().toISOString(),
+        totalRecords: records.length,
+        ...buildSummary(records),
+      });
+      setShowPrint(true);
+      setTimeout(() => handlePrint(), 100);
+    } catch (e: any) {
+      toast({
+        title: t.error,
+        description: e?.response?.data?.message || 'Error',
+        variant: 'destructive',
+      });
+    }
+  };
+
+  // طباعة مستند الجرد المفتوح في ديالوج العرض/التعديل (القيم الحالية على الشاشة)
+  const handlePrintDetails = () => {
+    if (!countDetails || lines.length === 0) {
+      toast({
+        title: t.error,
+        description: language === 'ar' ? 'لا توجد بيانات للطباعة' : 'No data to print',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    const records = lines.map((l: any) => {
+      const c = Number(counted(l)) || 0;
+      const sys = Number(l.system_stock) || 0;
+      const baseName = language === 'ar' ? l.product_name_ar || l.product_name : l.product_name;
+      const fullName =
+        `${baseName || ''}` +
+        (l.unit_name ? ` (${l.unit_name})` : '') +
+        (l.color_name ? ` - ${l.color_name}` : '');
+
+      return {
+        id: l.id,
+        count_id: countDetails.id,
+        product: {
+          id: l.product_id,
+          name: fullName,
+          name_ar: fullName,
+          sku: l.sku
+        },
+        warehouse: countDetails.warehouse,
+        system_stock: sys,
+        counted_stock: c,
+        difference: c - sys,
+        note: editNote || countDetails.note,
+        created_at: countDetails.created_at
+      };
+    });
+
+    setPrintData({
+      records,
+      countNumber: `INV-${countDetails.id}`,
+      warehouseName: language === 'ar'
+        ? countDetails.warehouse?.name_ar || countDetails.warehouse?.name
+        : countDetails.warehouse?.name,
+      dateFrom: undefined,
+      dateTo: undefined,
+      createdAt: countDetails.created_at || new Date().toISOString(),
+      totalRecords: records.length,
+      ...buildSummary(records),
+    });
     setShowPrint(true);
     setTimeout(() => handlePrint(), 100);
   };
 
-  const exportToExcel = () => {
-    const records = filteredInventoryRecords;
-    if (records.length === 0) {
+  const exportToExcel = async () => {
+    if (counts.length === 0) {
       toast({
         title: t.error,
         description: language === 'ar' ? 'لا توجد بيانات للتصدير' : 'No data to export',
@@ -701,66 +690,86 @@ const InventoryCount = () => {
       return;
     }
 
-    const excelData: any[] = records.map((record: InventoryRecord, index: number) => ({
-      '#': index + 1,
-      [t.product]: language === 'ar' ? record.product.name_ar || record.product.name : record.product.name,
-      [t.sku]: record.product.sku,
-      [t.warehouse]: language === 'ar' ? record.warehouse.name_ar || record.warehouse.name : record.warehouse.name,
-      [t.systemStock]: record.system_stock,
-      [t.countedStock]: record.counted_stock,
-      [t.difference]: record.difference,
-      [t.notes]: record.note || '',
-      [t.date]: formatDate(record.created_at),
-    }));
+    try {
+      const details = await Promise.all(
+        counts.map((c: any) => api.get(`/inventory-counts/${c.id}`).then((r) => r.data?.data))
+      );
 
-    const totalSystemStock = records.reduce((sum: number, r: InventoryRecord) => sum + r.system_stock, 0);
-    const totalCountedStock = records.reduce((sum: number, r: InventoryRecord) => sum + r.counted_stock, 0);
-    const totalDifference = totalCountedStock - totalSystemStock;
-    const positiveVariance = records.filter((r: InventoryRecord) => r.difference > 0).length;
-    const negativeVariance = records.filter((r: InventoryRecord) => r.difference < 0).length;
-    const zeroVariance = records.filter((r: InventoryRecord) => r.difference === 0).length;
+      const excelData: any[] = [];
+      let idx = 0;
+      let totalSystemStock = 0;
+      let totalCountedStock = 0;
+      let positiveVariance = 0;
+      let negativeVariance = 0;
+      let zeroVariance = 0;
 
-    excelData.push({
-      '#': '', [t.product]: '=== ' + (language === 'ar' ? 'الملخص' : 'Summary') + ' ===',
-      [t.sku]: '', [t.warehouse]: '', [t.systemStock]: totalSystemStock,
-      [t.countedStock]: totalCountedStock, [t.difference]: totalDifference,
-      [t.notes]: '', [t.date]: '',
-    });
-    excelData.push({
-      '#': '', [t.product]: t.positiveVariance, [t.sku]: '', [t.warehouse]: '',
-      [t.systemStock]: positiveVariance, [t.countedStock]: '', [t.difference]: '',
-      [t.notes]: '', [t.date]: '',
-    });
-    excelData.push({
-      '#': '', [t.product]: t.negativeVariance, [t.sku]: '', [t.warehouse]: '',
-      [t.systemStock]: negativeVariance, [t.countedStock]: '', [t.difference]: '',
-      [t.notes]: '', [t.date]: '',
-    });
-    excelData.push({
-      '#': '', [t.product]: t.zeroVariance, [t.sku]: '', [t.warehouse]: '',
-      [t.systemStock]: zeroVariance, [t.countedStock]: '', [t.difference]: '',
-      [t.notes]: '', [t.date]: '',
-    });
+      details.forEach((d: any) => {
+        (d?.lines || []).forEach((l: any) => {
+          idx += 1;
+          totalSystemStock += Number(l.system_stock) || 0;
+          totalCountedStock += Number(l.counted_stock) || 0;
+          if (l.difference > 0) positiveVariance += 1;
+          else if (l.difference < 0) negativeVariance += 1;
+          else zeroVariance += 1;
 
-    const worksheet = XLSX.utils.json_to_sheet(excelData);
-    worksheet['!cols'] = [
-      { wch: 5 }, { wch: 35 }, { wch: 15 }, { wch: 20 },
-      { wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 30 }, { wch: 15 }
-    ];
+          excelData.push({
+            '#': idx,
+            [t.countNumber]: `INV-${d.id}`,
+            [t.product]: language === 'ar' ? l.product_name_ar || l.product_name : l.product_name,
+            [t.sku]: l.sku,
+            [t.unit]: l.unit_name || '',
+            [t.color]: l.color_name || '',
+            [t.warehouse]: language === 'ar' ? d.warehouse?.name_ar || d.warehouse?.name : d.warehouse?.name,
+            [t.systemStock]: l.system_stock,
+            [t.countedStock]: l.counted_stock,
+            [t.difference]: l.difference,
+            [t.notes]: d.note || '',
+            [t.date]: formatDate(d.created_at),
+          });
+        });
+      });
 
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, 'Inventory Count');
-    const fileName = `inventory-count-${new Date().toISOString().split('T')[0]}.xlsx`;
-    const excelBuffer = XLSX.write(workbook, { bookType: 'xlsx', type: 'array' });
-    saveAs(new Blob([excelBuffer], { type: 'application/octet-stream' }), fileName);
+      const blank = {
+        '#': '', [t.countNumber]: '', [t.product]: '', [t.sku]: '', [t.unit]: '', [t.color]: '',
+        [t.warehouse]: '', [t.systemStock]: '', [t.countedStock]: '', [t.difference]: '',
+        [t.notes]: '', [t.date]: '',
+      };
 
-    toast({
-      title: t.success,
-      description: language === 'ar' ? 'تم تصدير البيانات بنجاح' : 'Data exported successfully',
-    });
+      excelData.push({
+        ...blank,
+        [t.product]: '=== ' + (language === 'ar' ? 'الملخص' : 'Summary') + ' ===',
+        [t.systemStock]: totalSystemStock,
+        [t.countedStock]: totalCountedStock,
+        [t.difference]: totalCountedStock - totalSystemStock,
+      });
+      excelData.push({ ...blank, [t.product]: t.positiveVariance, [t.systemStock]: positiveVariance });
+      excelData.push({ ...blank, [t.product]: t.negativeVariance, [t.systemStock]: negativeVariance });
+      excelData.push({ ...blank, [t.product]: t.zeroVariance, [t.systemStock]: zeroVariance });
+
+      const worksheet = XLSX.utils.json_to_sheet(excelData);
+      worksheet['!cols'] = [
+        { wch: 5 }, { wch: 12 }, { wch: 35 }, { wch: 15 }, { wch: 10 }, { wch: 12 },
+        { wch: 20 }, { wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 30 }, { wch: 15 }
+      ];
+
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, 'Inventory Count');
+      const fileName = `inventory-count-${new Date().toISOString().split('T')[0]}.xlsx`;
+      const excelBuffer = XLSX.write(workbook, { bookType: 'xlsx', type: 'array' });
+      saveAs(new Blob([excelBuffer], { type: 'application/octet-stream' }), fileName);
+
+      toast({
+        title: t.success,
+        description: language === 'ar' ? 'تم تصدير البيانات بنجاح' : 'Data exported successfully',
+      });
+    } catch (e: any) {
+      toast({
+        title: t.error,
+        description: e?.response?.data?.message || 'Error',
+        variant: 'destructive',
+      });
+    }
   };
-
-  const isLoading = recordsLoading;
 
   // ========== Render ==========
   return (
@@ -777,7 +786,7 @@ const InventoryCount = () => {
           </div>
         </div>
         <div className="flex gap-2">
-          {filteredInventoryRecords.length > 0 && (
+          {counts.length > 0 && (
             <>
               <Button variant="outline" onClick={handlePrintClick} className="gap-2">
                 <Printer size={16} />{t.print}
@@ -850,7 +859,7 @@ const InventoryCount = () => {
         </CardContent>
       </Card>
 
-      {/* Inventory Records Table */}
+      {/* Inventory Counts Table (صف واحد لكل مستند جرد) */}
       <Card>
         <CardHeader className="border-b"><CardTitle>{t.inventoryRecords}</CardTitle></CardHeader>
         <CardContent className="p-0">
@@ -873,67 +882,58 @@ const InventoryCount = () => {
                 <TableBody>
                   {isLoading ? (
                     <TableRow>
-                      <TableCell colSpan={11} className="text-center py-8">
+                      <TableCell colSpan={9} className="text-center py-8">
                         <div className="flex justify-center">
                           <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin" />
                         </div>
                       </TableCell>
                     </TableRow>
-                  ) : groupedInventoryRecords.length === 0 ? (
+                  ) : counts.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={11} className="text-center py-8 text-muted-foreground">
+                      <TableCell colSpan={9} className="text-center py-8 text-muted-foreground">
                         <ClipboardList className="mx-auto h-12 w-12 mb-4 opacity-20" />
                         <p>{t.noData}</p>
                       </TableCell>
                     </TableRow>
                   ) : (
-                    groupedInventoryRecords.map((record: any) => (
-                      <TableRow key={record.id}>
-                        <TableCell className="font-medium">
-                          INV-{formatDate(record.created_at).replace(/\//g, '')}-{record.warehouse?.id || record.warehouse_id}
+                    counts.map((r: any) => (
+                      <TableRow key={r.id}>
+                        <TableCell className="font-medium">INV-{r.id}</TableCell>
+                        <TableCell>
+                          {language === 'ar' ? r.warehouse?.name_ar || r.warehouse?.name : r.warehouse?.name}
                         </TableCell>
                         <TableCell>
-                          {language === 'ar' ? record.warehouse?.name_ar || record.warehouse?.name : record.warehouse?.name}
+                          <Badge variant="secondary">{r.products_count} {t.productsCount}</Badge>
+                          <span className="text-xs text-muted-foreground ms-2">
+                            ({r.lines_count} {language === 'ar' ? 'سطر' : 'lines'})
+                          </span>
                         </TableCell>
-                        <TableCell>
-                          <div>
-                            <p className="font-medium">
-                              {language === 'ar' ? record.product?.name_ar || record.product?.name : record.product?.name}
-                            </p>
-                            <p className="text-xs text-muted-foreground">{record.product?.sku}</p>
-                          </div>
-                          {record.variants_count > 1 && (
-                            <Badge variant="secondary" className="text-xs mt-1">
-                              {record.variants_count} {language === 'ar' ? 'مقاس/لون' : 'variants'}
-                            </Badge>
-                          )}
+                        <TableCell className="text-center font-medium">{r.total_system}</TableCell>
+                        <TableCell className="text-center font-medium">{r.total_counted}</TableCell>
+                        <TableCell className="text-center">
+                          {getStatusBadge({ difference: Number(r.total_difference) })}
                         </TableCell>
-                        <TableCell className="text-center font-medium">{record.system_stock}</TableCell>
-                        <TableCell className="text-center font-medium">{record.counted_stock}</TableCell>
-                        <TableCell className="text-center">{getStatusBadge(record)}</TableCell>
-                        <TableCell>{formatDate(record.created_at)}</TableCell>
+                        <TableCell>{formatDate(r.created_at)}</TableCell>
                         <TableCell>
-                          <span className="text-sm truncate max-w-[150px] block">{record.note || '-'}</span>
+                          <span className="text-sm truncate max-w-[150px] block">{r.note || '-'}</span>
                         </TableCell>
                         <TableCell className="text-center">
                           <div className="flex items-center justify-center gap-1">
-                            {/* زرار التعديل → edit mode */}
                             <Button
                               variant="ghost"
                               size="sm"
-                              onClick={() => handleOpenRecord(record, false)}
+                              onClick={() => handleOpenRecord(r, false)}
                               className="h-8 w-8 p-0 text-blue-600"
                               title={t.edit}
                             >
                               <Edit2 size={16} />
                             </Button>
-                            {/* زرار العرض → view only mode */}
                             <Button
                               variant="ghost"
                               size="sm"
                               className="h-8 w-8 p-0"
                               title={t.view}
-                              onClick={() => handleOpenRecord(record, true)}
+                              onClick={() => handleOpenRecord(r, true)}
                             >
                               <Eye size={16} />
                             </Button>
@@ -950,13 +950,14 @@ const InventoryCount = () => {
         </CardContent>
       </Card>
 
-      {/* Edit/View Inventory Dialog */}
-      <Dialog open={editRecordOpen} onOpenChange={setEditRecordOpen}>
-        <DialogContent className="max-w-2xl max-h-[90vh] flex flex-col p-0 overflow-hidden">
+      {/* Details / Edit Dialog */}
+      <Dialog open={editRecordOpen} onOpenChange={(o) => { if (!o) closeDetailsDialog(); }}>
+        <DialogContent className="max-w-5xl max-h-[90vh] flex flex-col p-0 overflow-hidden">
           <DialogHeader className="p-4 border-b">
             <DialogTitle className="flex items-center gap-2">
               {isViewMode ? <Eye size={18} /> : <Edit2 size={18} />}
               {isViewMode ? t.viewInventory : t.editInventory}
+              {selectedCountId ? ` - INV-${selectedCountId}` : ''}
               {isViewMode && (
                 <Badge variant="secondary" className="ms-2 text-xs">
                   {t.readOnly}
@@ -969,22 +970,29 @@ const InventoryCount = () => {
             <div className="flex justify-center py-12">
               <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin" />
             </div>
-          ) : selectedRecord && inventoryDetails ? (
+          ) : countDetails ? (
             <div className="flex-1 overflow-y-auto p-4 space-y-4">
-              {/* بيانات المنتج والمخزن */}
-              <div className="grid grid-cols-2 gap-4 p-3 bg-muted/30 rounded-lg">
+              {/* هيدر المستند */}
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 p-3 bg-muted/30 rounded-lg">
                 <div>
-                  <p className="text-xs text-muted-foreground">{t.product}</p>
-                  <p className="font-medium">
-                    {language === 'ar' ? selectedRecord.product?.name_ar || selectedRecord.product?.name : selectedRecord.product?.name}
-                  </p>
-                  <p className="text-xs text-muted-foreground mt-1">{selectedRecord.product?.sku}</p>
+                  <p className="text-xs text-muted-foreground">{t.countNumber}</p>
+                  <p className="font-medium">INV-{countDetails.id}</p>
                 </div>
                 <div>
                   <p className="text-xs text-muted-foreground">{t.warehouse}</p>
                   <p className="font-medium">
-                    {language === 'ar' ? selectedRecord.warehouse?.name_ar || selectedRecord.warehouse?.name : selectedRecord.warehouse?.name}
+                    {language === 'ar'
+                      ? countDetails.warehouse?.name_ar || countDetails.warehouse?.name
+                      : countDetails.warehouse?.name}
                   </p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground">{t.date}</p>
+                  <p className="font-medium">{formatDate(countDetails.created_at)}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground">{t.totalItems}</p>
+                  <p className="font-medium">{countDetails.lines_count}</p>
                 </div>
               </div>
 
@@ -1014,106 +1022,121 @@ const InventoryCount = () => {
                 </div>
               </div>
 
-              {/* عرض الألوان والمقاسات */}
-              {displayVariants.length > 0 ? (
-                <div className="space-y-2 mt-4">
-                  <div className="flex items-center justify-between">
-                    <Label className="text-sm font-medium">
-                      {language === 'ar' ? 'المقاسات والألوان' : 'Sizes & Colors'}
-                      <span className="text-xs text-muted-foreground ms-2">({displayVariants.length})</span>
-                    </Label>
-                    <span className="text-xs font-medium">
-                      {language === 'ar' ? 'المجموع: ' : 'Total: '}
-                      <b className="text-primary">{dlgCounted}</b>
-                    </span>
-                  </div>
-                  <div className="border rounded-lg divide-y max-h-[250px] overflow-y-auto bg-card">
-                    {displayVariants.map((v, idx) => (
-                      <div key={`${v.product_unit_id}-${v.color_id}`} className="flex items-center gap-2 p-2 hover:bg-muted/30">
-                        <Badge variant="secondary" className="text-xs shrink-0 min-w-[40px] justify-center">
-                          {v.unit_name}
-                        </Badge>
-                        <Badge variant="outline" className="text-xs gap-1 shrink-0">
-                          <div className="w-3 h-3 rounded-full border border-gray-200" style={{ backgroundColor: v.color_code }} />
-                          {v.color_name}
-                        </Badge>
-                        <div className="flex-1 text-xs text-muted-foreground text-end">
-                          {language === 'ar' ? 'مخزون النظام: ' : 'System: '}
-                          <b>{v.original_stock}</b>
-                        </div>
-                        {/* Input معطّل في وضع العرض فقط */}
-                        <Input
-                          type="number"
-                          min="0"
-                          disabled={isViewMode}
-                          value={v.counted_stock}
-                          onChange={(e) => {
-                            if (isViewMode) return;
-                            const val = Number(e.target.value);
-                            const base = displayVariants.map(x => ({ ...x }));
-                            base[idx] = { ...base[idx], counted_stock: isNaN(val) ? 0 : val };
-                            setEditVariants(base);
-                          }}
-                          className={cn(
-                            "w-20 text-center h-8",
-                            !isViewMode && v.counted_stock !== v.original_stock && "border-blue-500 bg-blue-50 dark:bg-blue-950/30 font-bold",
-                            isViewMode && "bg-muted cursor-not-allowed"
-                          )}
-                        />
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              ) : (
-                <div className="space-y-2 mt-4">
-                  <Label>{t.countedStock}</Label>
-                  <Input
-                    type="number"
-                    min="0"
-                    disabled={isViewMode}
-                    value={editCountedStock}
-                    onChange={(e) => {
-                      if (isViewMode) return;
-                      setEditCountedStock(Number(e.target.value));
-                    }}
-                    className={cn(
-                      "text-center text-lg font-medium",
-                      isViewMode && "bg-muted cursor-not-allowed"
-                    )}
-                  />
-                </div>
-              )}
+              {/* جدول السطور: منتج / مقاس / لون */}
+              <div className="border rounded-lg overflow-x-auto max-h-[45vh] overflow-y-auto">
+                <Table>
+                  <TableHeader className="sticky top-0 bg-background z-10">
+                    <TableRow>
+                      <TableHead>{t.product}</TableHead>
+                      <TableHead>{t.unit}</TableHead>
+                      <TableHead>{t.color}</TableHead>
+                      <TableHead>{language === 'ar' ? 'الباركود' : 'Barcode'}</TableHead>
+                      <TableHead className="text-center">{t.systemStock}</TableHead>
+                      <TableHead className="text-center">{t.countedStock}</TableHead>
+                      <TableHead className="text-center">{t.difference}</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {lines.map((l: any) => {
+                      const c = counted(l);
+                      const diff = c - l.system_stock;
+                      return (
+                        <TableRow key={l.id}>
+                          <TableCell>
+                            <p className="font-medium">
+                              {language === 'ar' ? l.product_name_ar || l.product_name : l.product_name}
+                            </p>
+                            <p className="text-xs text-muted-foreground">{l.sku}</p>
+                          </TableCell>
+                          <TableCell>{l.unit_name || '-'}</TableCell>
+                          <TableCell>
+                            {l.color_name ? (
+                              <Badge variant="outline" className="gap-1">
+                                <div
+                                  className="w-3 h-3 rounded-full border"
+                                  style={{ backgroundColor: l.color_hex || '#ccc' }}
+                                />
+                                {l.color_name}
+                              </Badge>
+                            ) : '-'}
+                          </TableCell>
+                          <TableCell className="font-mono text-xs">{l.barcode || '-'}</TableCell>
+                          <TableCell className="text-center">{l.system_stock}</TableCell>
+                          <TableCell className="text-center">
+                            <Input
+                              type="number"
+                              min="0"
+                              disabled={isViewMode}
+                              value={c}
+                              onChange={(e) =>
+                                setEditLines((p) => ({
+                                  ...p,
+                                  [l.id]: Math.max(0, Number(e.target.value) || 0)
+                                }))
+                              }
+                              className={cn(
+                                'w-20 mx-auto text-center h-8',
+                                !isViewMode && c !== l.counted_stock && 'border-blue-500 bg-blue-50 dark:bg-blue-950/30 font-bold',
+                                isViewMode && 'bg-muted cursor-not-allowed'
+                              )}
+                            />
+                          </TableCell>
+                          <TableCell
+                            className={cn(
+                              'text-center font-bold',
+                              diff > 0 && 'text-green-600',
+                              diff < 0 && 'text-red-600'
+                            )}
+                          >
+                            {diff > 0 ? `+${diff}` : diff}
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              </div>
 
               {/* ملاحظات */}
-              <div className="space-y-2 mt-4">
+              <div className="space-y-2">
                 <Label>{t.notes}</Label>
                 <Textarea
                   value={editNote}
-                  onChange={(e) => {
-                    if (isViewMode) return;
-                    setEditNote(e.target.value);
-                  }}
+                  onChange={(e) => setEditNote(e.target.value)}
                   rows={2}
                   disabled={isViewMode}
                   placeholder={t.addNote}
-                  className={cn(isViewMode && "bg-muted cursor-not-allowed")}
+                  className={cn(isViewMode && 'bg-muted cursor-not-allowed')}
                 />
               </div>
             </div>
           ) : null}
 
           <DialogFooter className="p-4 border-t gap-2">
-            {/* في وضع العرض: زرار إغلاق فقط */}
+            <Button
+              variant="outline"
+              onClick={handlePrintDetails}
+              disabled={detailsLoading || lines.length === 0}
+              className="gap-2 me-auto"
+            >
+              <Printer size={16} />{t.print}
+            </Button>
             {isViewMode ? (
-              <Button variant="outline" onClick={() => setEditRecordOpen(false)}>
+              <Button variant="outline" onClick={closeDetailsDialog}>
                 {t.close}
               </Button>
             ) : (
               <>
-                <Button variant="outline" onClick={() => setEditRecordOpen(false)}>{t.cancel}</Button>
-                <Button onClick={handleSaveEdit} disabled={updateMutation.isPending} className="gap-2">
-                  {updateMutation.isPending ? <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" /> : <Save size={16} />}
-                  {updateMutation.isPending ? (language === 'ar' ? 'جاري الحفظ...' : 'Saving...') : t.saveChanges}
+                <Button variant="outline" onClick={closeDetailsDialog}>{t.cancel}</Button>
+                <Button
+                  onClick={() => saveMutation.mutate()}
+                  disabled={saveMutation.isPending || detailsLoading || lines.length === 0}
+                  className="gap-2"
+                >
+                  {saveMutation.isPending
+                    ? <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
+                    : <Save size={16} />}
+                  {saveMutation.isPending ? (language === 'ar' ? 'جاري الحفظ...' : 'Saving...') : t.saveChanges}
                 </Button>
               </>
             )}
