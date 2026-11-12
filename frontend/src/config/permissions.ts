@@ -10,6 +10,26 @@ export interface PagePermission {
   allowedRoles: UserRole[];
 }
 
+/** Convert API role labels such as "Admin" to the canonical UI role. */
+export const normalizeUserRole = (role: UserRole | string | null | undefined): UserRole | undefined => {
+  if (!role) return undefined;
+
+  const normalized = role.trim().toLowerCase();
+  const roleMap: Record<string, UserRole> = {
+    admin: 'admin',
+    cashier: 'Cashier',
+    manager: 'Manager',
+    accountant: 'Accountant',
+    sales: 'Sales',
+    purchasing: 'purchasing',
+    warehouse: 'warehouse',
+    hr: 'HR',
+    viewer: 'viewer',
+  };
+
+  return roleMap[normalized];
+};
+
 export const PAGES: PagePermission[] = [
   {
     id: 'dashboard',
@@ -110,20 +130,22 @@ export const PAGES: PagePermission[] = [
 ];
 
 // ✅ دالة للتحقق من صلاحية الوصول للصفحة
-export const canAccessPage = (role: UserRole | undefined, path: string): boolean => {
-  if (!role) return false;
-  if (role === 'admin') return true; // الأدمن كل حاجة
+export const canAccessPage = (role: UserRole | string | undefined, path: string): boolean => {
+  const canonicalRole = normalizeUserRole(role);
+  if (!canonicalRole) return false;
+  if (canonicalRole === 'admin') return true; // الأدمن كل حاجة
 
   const page = PAGES.find(p => p.path === path);
   if (!page) return false;
 
-  return page.allowedRoles.includes(role);
+  return page.allowedRoles.includes(canonicalRole);
 };
 
 // ✅ دالة لجلب الصفحات المسموحة للمستخدم
-export const getAllowedPages = (role: UserRole | undefined): PagePermission[] => {
-  if (!role) return [];
-  if (role === 'admin') return PAGES; // الأدمن كل حاجة
+export const getAllowedPages = (role: UserRole | string | undefined): PagePermission[] => {
+  const canonicalRole = normalizeUserRole(role);
+  if (!canonicalRole) return [];
+  if (canonicalRole === 'admin') return PAGES; // الأدمن كل حاجة
 
-  return PAGES.filter(page => page.allowedRoles.includes(role));
+  return PAGES.filter(page => page.allowedRoles.includes(canonicalRole));
 };
