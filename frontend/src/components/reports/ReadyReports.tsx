@@ -732,13 +732,16 @@ checkOut: 'تسجيل الخروج',
 
       case 'salesReturns': {
         return {
-          headers: [t.date, t.returnNo, t.invoiceNo, t.customer, t.amount, t.reason],
+          headers: [t.date, t.returnNo, t.invoiceNo, t.customer, t.amount, t.method, t.reason],
           rows: salesReturns.map((ret) => [
             formatReportDate(ret.created_at),
             ret.return_number,
             ret.invoice_number,
             relationName(ret.customer),
             formatCurrency(numericValue(ret.total_amount)),
+            (ret as SalesReturn & { return_method_label?: string; return_method?: string }).return_method_label
+              || (ret as SalesReturn & { return_method?: string }).return_method
+              || '-',
             ret.reason || '-'
           ]),
           total: salesReturns.reduce((sum, ret) => sum + numericValue(ret.total_amount), 0)
@@ -800,12 +803,14 @@ checkOut: 'تسجيل الخروج',
 
       case 'purchaseReturns': {
         return {
-          headers: [t.date, t.returnNo, t.invoiceNo, t.amount, t.reason],
+          headers: [t.date, t.returnNo, t.invoiceNo, t.supplier, t.amount, t.method, t.reason],
           rows: purchaseReturns.map((ret) => [
             formatReportDate(ret.return_date || ret.created_at),
             ret.return_number,
             ret.invoice_number,
+            (ret as PurchaseReturn & { supplier_name?: string }).supplier_name || '-',
             formatCurrency(numericValue(ret.total_amount)),
+            (ret as PurchaseReturn & { payment_method?: string }).payment_method || '-',
             ret.reason || '-'
           ]),
           total: purchaseReturns.reduce((sum, ret) => sum + numericValue(ret.total_amount), 0)
@@ -833,15 +838,16 @@ checkOut: 'تسجيل الخروج',
 
       case 'returnInvoices': {
         return {
-          headers: [t.date, t.returnNo, t.invoiceNo, t.amount, t.method, t.reason],
+          headers: [t.date, t.returnNo, t.invoiceNo, t.customer, t.amount, t.method, t.reason],
           rows: returnInvoices.map((ret) => [
             formatReportDate(ret.created_at, true),
             ret.return_number,
-            ret.invoice?.invoice_number || '-',
+            (ret as ReturnInvoice & { invoice_number?: string }).invoice_number || ret.invoice?.invoice_number || '-',
+            (ret as ReturnInvoice & { customer?: string }).customer || relationName(ret.invoice?.customer),
             formatCurrency(ret.total_amount),
             ret.refund_method === 'card' ? (language === 'ar' ? 'بطاقة' : 'Card') :
               ret.refund_method === 'cash' ? (language === 'ar' ? 'نقدي' : 'Cash') :
-              ret.refund_method === 'wallet' ? (language === 'ar' ? 'محفظة' : 'Wallet') : ret.refund_method,
+              ret.refund_method === 'wallet' ? (language === 'ar' ? 'محفظة' : 'Wallet') : ret.refund_method || '-',
             ret.reason
           ]),
           total: returnInvoices.reduce((sum, ret) => sum + numericValue(ret.total_amount), 0)
