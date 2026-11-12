@@ -74,6 +74,38 @@ import {
   ReportAccumulator
 } from '@/types';
 
+type ApiResponseLike = { data?: unknown };
+
+const extractApiArray = <T,>(response: ApiResponseLike): T[] => {
+  const payload = response?.data;
+  if (Array.isArray(payload)) return payload as T[];
+  if (payload && typeof payload === 'object' && Array.isArray((payload as { data?: unknown }).data)) {
+    return (payload as { data: T[] }).data;
+  }
+  return [];
+};
+
+const relationName = (relation: unknown, fallback = '-') => {
+  if (typeof relation === 'string' || typeof relation === 'number') return String(relation);
+  if (relation && typeof relation === 'object' && 'name' in relation) {
+    const name = (relation as { name?: unknown }).name;
+    return name === null || name === undefined || name === '' ? fallback : String(name);
+  }
+  return fallback;
+};
+
+const formatReportDate = (value: unknown, withTime = false) => {
+  if (!value) return '-';
+  const parsed = new Date(String(value));
+  if (Number.isNaN(parsed.getTime())) return String(value);
+  return format(parsed, withTime ? 'yyyy-MM-dd HH:mm' : 'yyyy-MM-dd');
+};
+
+const numericValue = (value: unknown) => {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : 0;
+};
+
 const ReadyReports = () => {
   const { language, direction } = useLanguage();
   const { formatCurrency, settings } = useRegionalSettings();
@@ -95,7 +127,7 @@ const ReadyReports = () => {
     queryKey: ['branches'],
     queryFn: async () => {
       const response = await api.post('/branch/index');
-      return response.data.data || [];
+      return extractApiArray(response);
     },
   });
 
@@ -103,7 +135,7 @@ const ReadyReports = () => {
     queryKey: ['warehouses'],
     queryFn: async () => {
       const response = await api.post('/warehouse/index');
-      return response.data.data || [];
+      return extractApiArray(response);
     }
   });
 
@@ -111,64 +143,74 @@ const ReadyReports = () => {
     queryKey: ['users'],
     queryFn: async () => {
       const response = await api.post('/user/index');
-      return response.data.data || [];
+      return extractApiArray(response);
     }
   });
 
   // ==================== Sales Data ====================
   const { data: salesInvoices = [] } = useQuery<SalesInvoice[]>({
-    queryKey: ['sales-invoices', dateFrom, dateTo],
+    queryKey: ['sales-invoices', dateFrom, dateTo, selectedBranch, selectedUser],
     queryFn: async () => {
       const response = await api.post('/sales-invoices/index', {
-        date_from: `${dateFrom}`,
-        date_to: `${dateTo}`,
-        branch_id: selectedBranch === 'all' ? undefined : selectedBranch,
-        user_id: selectedUser === 'all' ? undefined : selectedUser
+        paginate: false,
+        filters: {
+          date_from: dateFrom,
+          date_to: dateTo,
+          branch_id: selectedBranch === 'all' ? undefined : selectedBranch,
+          sales_representative_id: selectedUser === 'all' ? undefined : selectedUser
+        }
       });
-      return response.data.data || [];
+      return extractApiArray(response);
     },
     enabled: activeModule === 'sales'
   });
 
   const { data: salesReturns = [] } = useQuery<SalesReturn[]>({
-    queryKey: ['sales-returns', dateFrom, dateTo],
+    queryKey: ['sales-returns', dateFrom, dateTo, selectedBranch, selectedUser],
     queryFn: async () => {
       const response = await api.post('/sales-return/index', {
-        date_from: `${dateFrom}`,
-        date_to: `${dateTo}`,
-        branch_id: selectedBranch === 'all' ? undefined : selectedBranch,
-        user_id: selectedUser === 'all' ? undefined : selectedUser
+        paginate: false,
+        filters: {
+          date_from: dateFrom,
+          date_to: dateTo,
+          customer_id: selectedUser === 'all' ? undefined : selectedUser
+        }
       });
-      return response.data.data || [];
+      return extractApiArray(response);
     },
     enabled: activeModule === 'sales'
   });
 
   // ==================== Purchasing Data ====================
   const { data: purchaseInvoices = [] } = useQuery<PurchaseInvoice[]>({
-    queryKey: ['purchase-invoices', dateFrom, dateTo],
+    queryKey: ['purchase-invoices', dateFrom, dateTo, selectedBranch, selectedUser],
     queryFn: async () => {
       const response = await api.post('/purchases-invoices/index', {
-        date_from: `${dateFrom} `,
-        date_to: `${dateTo}`,
-        branch_id: selectedBranch === 'all' ? undefined : selectedBranch,
-        user_id: selectedUser === 'all' ? undefined : selectedUser
+        paginate: false,
+        filters: {
+          date_from: dateFrom,
+          date_to: dateTo,
+          branch_id: selectedBranch === 'all' ? undefined : selectedBranch,
+          supplier_id: selectedUser === 'all' ? undefined : selectedUser
+        }
       });
-      return response.data.data || [];
+      return extractApiArray(response);
     },
     enabled: activeModule === 'purchasing'
   });
 
   const { data: purchaseReturns = [] } = useQuery<PurchaseReturn[]>({
-    queryKey: ['purchase-returns', dateFrom, dateTo],
+    queryKey: ['purchase-returns', dateFrom, dateTo, selectedBranch, selectedUser],
     queryFn: async () => {
       const response = await api.post('/purchase-returns/index', {
-        date_from: `${dateFrom} `,
-        date_to: `${dateTo}`,
-        branch_id: selectedBranch === 'all' ? undefined : selectedBranch,
-        user_id: selectedUser === 'all' ? undefined : selectedUser
+        paginate: false,
+        filters: {
+          date_from: dateFrom,
+          date_to: dateTo,
+          supplier_id: selectedUser === 'all' ? undefined : selectedUser
+        }
       });
-      return response.data.data || [];
+      return extractApiArray(response);
     },
     enabled: activeModule === 'purchasing'
   });
@@ -178,7 +220,7 @@ const ReadyReports = () => {
     queryKey: ['products'],
     queryFn: async () => {
       const response = await api.post('/product/index');
-      return response.data.data || [];
+      return extractApiArray(response);
     }
   });
 
@@ -187,7 +229,7 @@ const ReadyReports = () => {
     queryKey: ['customers'],
     queryFn: async () => {
       const response = await api.post('/customer/index');
-      return response.data.data || [];
+      return extractApiArray(response);
     }
   });
 
@@ -195,7 +237,7 @@ const ReadyReports = () => {
     queryKey: ['suppliers'],
     queryFn: async () => {
       const response = await api.post('/suppliers/index');
-      return response.data.data || [];
+      return extractApiArray(response);
     }
   });
 
@@ -204,7 +246,7 @@ const ReadyReports = () => {
     queryKey: ['employees'],
     queryFn: async () => {
       const response = await api.post('/employee/index');
-      return response.data.data || [];
+      return extractApiArray(response);
     }
   });
 
@@ -212,7 +254,7 @@ const ReadyReports = () => {
     queryKey: ['sales-representatives'],
     queryFn: async () => {
       const response = await api.post('/sales-representative/index');
-      return response.data.data || [];
+      return extractApiArray(response);
     }
   });
 
@@ -223,7 +265,7 @@ const ReadyReports = () => {
         date_from: dateFrom,
         date_to: dateTo
       });
-      return response.data.data || [];
+      return extractApiArray(response);
     }
   });
 
@@ -231,7 +273,7 @@ const ReadyReports = () => {
     queryKey: ['delivery-men'],
     queryFn: async () => {
       const response = await api.post('/delevery-man/index');
-      return response.data.data || [];
+      return extractApiArray(response);
     }
   });
 
@@ -240,7 +282,7 @@ const ReadyReports = () => {
     queryKey: ['treasuries'],
     queryFn: async () => {
       const response = await api.post('/treasury/index');
-      return response.data.data || [];
+      return extractApiArray(response);
     }
   });
 
@@ -251,7 +293,7 @@ const ReadyReports = () => {
         date_from: dateFrom,
         date_to: dateTo
       });
-      return response.data.data || [];
+      return extractApiArray(response);
     }
   });
 
@@ -263,7 +305,7 @@ const ReadyReports = () => {
         date_from: dateFrom,
         date_to: dateTo
       });
-      return response.data.data || [];
+      return extractApiArray(response);
     }
   });
 
@@ -401,6 +443,7 @@ checkOut: 'Check Out',
       movement: 'Movement',
       warehouseCol: 'Warehouse',
       invoices: 'Invoices',
+      products: 'Products',
       sales: 'Sales',
       commission: 'Commission',
       representative: 'Representative',
@@ -409,6 +452,10 @@ checkOut: 'Check Out',
       method: 'Method',
       currency: 'Currency',
       checkIn: 'Check In',
+      present: 'Present',
+      absent: 'Absent',
+      late: 'Late',
+      leave: 'Leave',
       salary: 'Salary',
     },
     ar: {
@@ -543,6 +590,7 @@ checkOut: 'تسجيل الخروج',
       movement: 'الحركة',
       warehouseCol: 'المخزن',
       invoices: 'الفواتير',
+      products: 'المنتجات',
       sales: 'المبيعات',
       commission: 'العمولة',
       representative: 'المندوب',
@@ -553,6 +601,10 @@ checkOut: 'تسجيل الخروج',
       reference: 'المرجع',
       referenceNo: 'رقم المرجع',
       checkIn: 'تسجيل الدخول',
+      present: 'حاضر',
+      absent: 'غائب',
+      late: 'متأخر',
+      leave: 'إجازة',
       salary: 'الراتب',
       checkOut: 'تسجيل الخروج',
       number: 'الرقم',
@@ -624,24 +676,24 @@ checkOut: 'تسجيل الخروج',
         return {
           headers: [t.date, t.invoiceNo, t.customer, t.representative, t.amount, t.currency, t.branch],
           rows: salesInvoices.map((inv) => [
-            format(new Date(inv.created_at), 'yyyy-MM-dd HH:mm'),
+            formatReportDate(inv.created_at, true),
             inv.invoice_number,
-            inv.customer.name,
-            inv.sales_representative.name || '-',
-            formatCurrency(Number(inv.total_amount)),
+            relationName(inv.customer),
+            relationName(inv.sales_representative) || '-',
+            formatCurrency(numericValue(inv.total_amount)),
             inv.currency || '-',
             inv.branch
           ]),
-          total: salesInvoices.reduce((sum, inv) => sum + Number(inv.total_amount), 0)
+          total: salesInvoices.reduce((sum, inv) => sum + numericValue(inv.total_amount), 0)
         };
       }
 
       case 'salesByCustomer': {
         const byCustomer = salesInvoices.reduce((acc: ReportAccumulator, inv) => {
-          const name = inv.customer.name;
+          const name = relationName(inv.customer);
           if (!acc[name]) acc[name] = { name, invoices: 0, total: 0 };
           acc[name].invoices = (acc[name].invoices || 0) + 1;
-          acc[name].total = (acc[name].total || 0) + Number(inv.total_amount);
+          acc[name].total = (acc[name].total || 0) + numericValue(inv.total_amount);
           return acc;
         }, {});
         
@@ -652,16 +704,16 @@ checkOut: 'تسجيل الخروج',
             c.invoices,
             formatCurrency(c.total)
           ]),
-          total: salesInvoices.reduce((sum, inv) => sum + Number(inv.total_amount), 0)
+          total: salesInvoices.reduce((sum, inv) => sum + numericValue(inv.total_amount), 0)
         };
       }
 
       case 'salesByRepresentative': {
         const byRep = salesInvoices.reduce((acc: ReportAccumulator, inv) => {
-          const name = inv.sales_representative.name || (language === 'ar' ? 'بدون مندوب' : 'No Representative');
+          const name = relationName(inv.sales_representative) || (language === 'ar' ? 'بدون مندوب' : 'No Representative');
           if (!acc[name]) acc[name] = { name, invoices: 0, total: 0 };
           acc[name].invoices = (acc[name].invoices || 0) + 1;
-          acc[name].total = (acc[name].total || 0) + Number(inv.total_amount);
+          acc[name].total = (acc[name].total || 0) + numericValue(inv.total_amount);
           return acc;
         }, {});
         
@@ -672,7 +724,7 @@ checkOut: 'تسجيل الخروج',
             r.invoices,
             formatCurrency(r.total)
           ]),
-          total: salesInvoices.reduce((sum, inv) => sum + Number(inv.total_amount), 0)
+          total: salesInvoices.reduce((sum, inv) => sum + numericValue(inv.total_amount), 0)
         };
       }
 
@@ -680,14 +732,14 @@ checkOut: 'تسجيل الخروج',
         return {
           headers: [t.date, t.returnNo, t.invoiceNo, t.customer, t.amount, t.reason],
           rows: salesReturns.map((ret) => [
-            format(new Date(ret.created_at), 'yyyy-MM-dd'),
+            formatReportDate(ret.created_at),
             ret.return_number,
             ret.invoice_number,
-            ret.customer,
-            formatCurrency(Number(ret.total_amount)),
+            relationName(ret.customer),
+            formatCurrency(numericValue(ret.total_amount)),
             ret.reason || '-'
           ]),
-          total: salesReturns.reduce((sum, ret) => sum + Number(ret.total_amount), 0)
+          total: salesReturns.reduce((sum, ret) => sum + numericValue(ret.total_amount), 0)
         };
       }
 
@@ -697,12 +749,12 @@ checkOut: 'تسجيل الخروج',
         return {
           headers: [t.date, t.invoiceNo, t.customer, t.amount],
           rows: salesInvoices.map((inv) => [
-            format(new Date(inv.created_at), 'yyyy-MM-dd'),
+            formatReportDate(inv.created_at),
             inv.invoice_number,
-            inv.customer.name,
-            formatCurrency(Number(inv.total_amount))
+            relationName(inv.customer),
+            formatCurrency(numericValue(inv.total_amount))
           ]),
-          total: salesInvoices.reduce((sum, inv) => sum + Number(inv.total_amount), 0)
+          total: salesInvoices.reduce((sum, inv) => sum + numericValue(inv.total_amount), 0)
         };
       }
 
@@ -711,23 +763,25 @@ checkOut: 'تسجيل الخروج',
         return {
           headers: [t.date, t.invoiceNo, t.supplier, t.amount, t.currency, t.warehouseCol],
           rows: purchaseInvoices.map((inv) => [
-            inv.invoice_date,
+            formatReportDate(inv.invoice_date),
             inv.invoice_number,
-            inv.supplier.name || '-',
-            formatCurrency(Number(inv.total_amount)),
-            inv.currency || '-',
-            inv.warehouse
+            relationName(inv.supplier) !== '-' ? relationName(inv.supplier) : (inv as PurchaseInvoice & { supplier_name?: string }).supplier_name || '-',
+            formatCurrency(numericValue(inv.total_amount)),
+            inv.currency || (inv as PurchaseInvoice & { currency_code?: string }).currency_code || '-',
+            inv.warehouse || (inv as PurchaseInvoice & { warehouse_name?: string }).warehouse_name || '-'
           ]),
-          total: purchaseInvoices.reduce((sum, inv) => sum + Number(inv.total_amount), 0)
+          total: purchaseInvoices.reduce((sum, inv) => sum + numericValue(inv.total_amount), 0)
         };
       }
 
       case 'purchaseBySupplier': {
         const bySupplier = purchaseInvoices.reduce((acc: ReportAccumulator, inv) => {
-          const name = inv.supplier.name || (language === 'ar' ? 'غير معروف' : 'Unknown');
+          const name = relationName(inv.supplier) !== '-'
+            ? relationName(inv.supplier)
+            : (inv as PurchaseInvoice & { supplier_name?: string }).supplier_name || (language === 'ar' ? 'غير معروف' : 'Unknown');
           if (!acc[name]) acc[name] = { name, invoices: 0, total: 0 };
           acc[name].invoices = (acc[name].invoices || 0) + 1;
-          acc[name].total = (acc[name].total || 0) + Number(inv.total_amount);
+          acc[name].total = (acc[name].total || 0) + numericValue(inv.total_amount);
           return acc;
         }, {});
         
@@ -738,7 +792,7 @@ checkOut: 'تسجيل الخروج',
             s.invoices,
             formatCurrency(s.total)
           ]),
-          total: purchaseInvoices.reduce((sum, inv) => sum + Number(inv.total_amount), 0)
+          total: purchaseInvoices.reduce((sum, inv) => sum + numericValue(inv.total_amount), 0)
         };
       }
 
@@ -746,20 +800,22 @@ checkOut: 'تسجيل الخروج',
         return {
           headers: [t.date, t.returnNo, t.invoiceNo, t.amount, t.reason],
           rows: purchaseReturns.map((ret) => [
-            format(new Date(ret.created_at), 'yyyy-MM-dd'),
+            formatReportDate(ret.created_at),
             ret.return_number,
             ret.invoice_number,
-            formatCurrency(Number(ret.total_amount)),
+            formatCurrency(numericValue(ret.total_amount)),
             ret.reason || '-'
           ]),
-          total: purchaseReturns.reduce((sum, ret) => sum + Number(ret.total_amount), 0)
+          total: purchaseReturns.reduce((sum, ret) => sum + numericValue(ret.total_amount), 0)
         };
       }
 
       case 'supplierBalances': {
         const balances = purchaseInvoices.reduce((acc: Record<string, number>, inv) => {
-          const name = inv.supplier.name || (language === 'ar' ? 'غير معروف' : 'Unknown');
-          acc[name] = (acc[name] || 0) + Number(inv.total_amount);
+          const name = relationName(inv.supplier) !== '-'
+            ? relationName(inv.supplier)
+            : (inv as PurchaseInvoice & { supplier_name?: string }).supplier_name || (language === 'ar' ? 'غير معروف' : 'Unknown');
+          acc[name] = (acc[name] || 0) + numericValue(inv.total_amount);
           return acc;
         }, {});
         
@@ -777,16 +833,16 @@ checkOut: 'تسجيل الخروج',
         return {
           headers: [t.date, t.returnNo, t.invoiceNo, t.amount, t.method, t.reason],
           rows: returnInvoices.map((ret) => [
-            format(new Date(ret.created_at), 'yyyy-MM-dd HH:mm'),
+            formatReportDate(ret.created_at, true),
             ret.return_number,
-            ret.invoice.invoice_number,
+            ret.invoice?.invoice_number || '-',
             formatCurrency(ret.total_amount),
             ret.refund_method === 'card' ? (language === 'ar' ? 'بطاقة' : 'Card') :
               ret.refund_method === 'cash' ? (language === 'ar' ? 'نقدي' : 'Cash') :
               ret.refund_method === 'wallet' ? (language === 'ar' ? 'محفظة' : 'Wallet') : ret.refund_method,
             ret.reason
           ]),
-          total: returnInvoices.reduce((sum, ret) => sum + ret.total_amount, 0)
+          total: returnInvoices.reduce((sum, ret) => sum + numericValue(ret.total_amount), 0)
         };
       }
 
@@ -799,16 +855,16 @@ checkOut: 'تسجيل الخروج',
             p.name,
             p.category?.name || '-',
             p.stock,
-            formatCurrency(Number(p.price)),
-            formatCurrency(Number(p.cost)),
-            p.stock * Number(p.cost)
+            formatCurrency(numericValue(p.price)),
+            formatCurrency(numericValue(p.cost)),
+            numericValue(p.stock) * numericValue(p.cost)
           ]),
-          total: products.reduce((sum, p) => sum + (p.stock * Number(p.cost)), 0)
+          total: products.reduce((sum, p) => sum + (numericValue(p.stock) * numericValue(p.cost)), 0)
         };
       }
 
       case 'lowStock': {
-        const lowStock = products.filter(p => p.stock > 0 && p.stock <= p.reorder_level);
+        const lowStock = products.filter(p => numericValue(p.stock) > 0 && numericValue(p.stock) <= numericValue(p.reorder_level));
         return {
           headers: [t.sku, t.product, t.stock, t.minStock],
           rows: lowStock.map((p) => [
@@ -822,7 +878,7 @@ checkOut: 'تسجيل الخروج',
       }
 
       case 'outOfStock': {
-        const outOfStock = products.filter(p => p.stock === 0);
+        const outOfStock = products.filter(p => numericValue(p.stock) === 0);
         return {
           headers: [t.sku, t.product, t.category],
           rows: outOfStock.map((p) => [
@@ -840,7 +896,7 @@ checkOut: 'تسجيل الخروج',
           if (!acc[cat]) acc[cat] = { name: cat, count: 0, stock: 0, value: 0 };
           acc[cat].count = (acc[cat].count || 0) + 1;
           acc[cat].stock = (acc[cat].stock || 0) + p.stock;
-          acc[cat].value = (acc[cat].value || 0) + (p.stock * Number(p.cost));
+          acc[cat].value = (acc[cat].value || 0) + (numericValue(p.stock) * numericValue(p.cost));
           return acc;
         }, {});
         
@@ -852,13 +908,13 @@ checkOut: 'تسجيل الخروج',
             c.stock,
             formatCurrency(c.value)
           ]),
-          total: products.reduce((sum, p) => sum + (p.stock * Number(p.cost)), 0)
+          total: products.reduce((sum, p) => sum + (numericValue(p.stock) * numericValue(p.cost)), 0)
         };
       }
 
       // ==================== Finance Reports ====================
       case 'expenseReport': {
-        const expenses = finances.filter(f => f.category === 'expense' || f.amount.startsWith('-'));
+        const expenses = finances.filter(f => f.category === 'expense' || String(f.amount ?? '').startsWith('-'));
         return {
           headers: [t.date, t.category, t.description, t.amount, t.method],
           rows: expenses.map((f) => [
@@ -868,7 +924,7 @@ checkOut: 'تسجيل الخروج',
             f.formatted_amount,
             f.payment_method_arabic
           ]),
-          total: expenses.reduce((sum, f) => sum + Number(f.amount), 0)
+          total: expenses.reduce((sum, f) => sum + numericValue(f.amount), 0)
         };
       }
 
@@ -878,11 +934,11 @@ checkOut: 'تسجيل الخروج',
           rows: treasuries.map((t) => [
             t.name,
             t.code,
-            t.branch.name,
+            relationName(t.branch),
             formatCurrency(t.balance),
             t.currency
           ]),
-          total: treasuries.reduce((sum, tr) => sum + tr.balance, 0)
+          total: treasuries.reduce((sum, tr) => sum + numericValue(tr.balance), 0)
         };
       }
 
@@ -897,7 +953,7 @@ checkOut: 'تسجيل الخروج',
             f.payment_method_arabic,
             f.reference_number
           ]),
-          total: finances.reduce((sum, f) => sum + Number(f.amount), 0)
+          total: finances.reduce((sum, f) => sum + numericValue(f.amount), 0)
         };
       }
 
@@ -918,8 +974,8 @@ checkOut: 'تسجيل الخروج',
 
       case 'topCustomers': {
         const customerTotals = salesInvoices.reduce((acc: Record<string, number>, inv) => {
-          const name = inv.customer.name;
-          acc[name] = (acc[name] || 0) + Number(inv.total_amount);
+          const name = relationName(inv.customer);
+          acc[name] = (acc[name] || 0) + numericValue(inv.total_amount);
           return acc;
         }, {});
         
@@ -941,8 +997,8 @@ checkOut: 'تسجيل الخروج',
       case 'customerBalances': {
         // API معندهاش المتبقي، هنستخدم total amount
         const balances = salesInvoices.reduce((acc: Record<string, number>, inv) => {
-          const name = inv.customer.name;
-          acc[name] = (acc[name] || 0) + Number(inv.total_amount);
+          const name = relationName(inv.customer);
+          acc[name] = (acc[name] || 0) + numericValue(inv.total_amount);
           return acc;
         }, {});
         
@@ -963,7 +1019,7 @@ checkOut: 'تسجيل الخروج',
             s.name,
             s.phone,
             s.contact_person,
-            formatCurrency(Number(s.credit_limit)),
+            formatCurrency(numericValue(s.credit_limit)),
             s.payment_terms
           ]),
           total: suppliers.length
@@ -980,9 +1036,9 @@ checkOut: 'تسجيل الخروج',
             e.department || '-',
             e.phone,
             e.email,
-            formatCurrency(Number(e.salary))
+            formatCurrency(numericValue(e.salary))
           ]),
-          total: employees.reduce((sum, e) => sum + Number(e.salary), 0)
+          total: employees.reduce((sum, e) => sum + numericValue(e.salary), 0)
         };
       }
 
@@ -991,7 +1047,7 @@ checkOut: 'تسجيل الخروج',
           headers: [t.date, t.name, t.checkIn, t.checkOut, t.status],
           rows: attendance.map((a) => [
             a.date,
-            a.employee.name || '-',
+            relationName(a.employee) || '-',
             a.check_in || '-',
             a.check_out || '-',
             a.status === 'present' ? (language === 'ar' ? 'حاضر' : 'Present') :
@@ -1005,7 +1061,7 @@ checkOut: 'تسجيل الخروج',
 
       case 'attendanceSummary': {
         const summary = attendance.reduce((acc: Record<string, any>, a) => {
-          const name = a.employee.name || '-';
+          const name = relationName(a.employee) || '-';
           if (!acc[name]) {
             acc[name] = { name, present: 0, absent: 0, late: 0, leave: 0 };
           }
@@ -1055,15 +1111,15 @@ checkOut: 'تسجيل الخروج',
 
       case 'salesCommissions': {
         const commissions = salesInvoices.reduce((acc: ReportAccumulator, inv) => {
-          const repName = inv.sales_representative.name || (language === 'ar' ? 'بدون مندوب' : 'No Rep');
+          const repName = relationName(inv.sales_representative) || (language === 'ar' ? 'بدون مندوب' : 'No Rep');
           if (!acc[repName]) acc[repName] = { name: repName, sales: 0, commission: 0 };
           
           // البحث عن نسبة العمولة من قائمة المندوبين
-          const rep = salesRepresentatives.find(r => r.name === inv.sales_representative.name);
+          const rep = salesRepresentatives.find(r => r.name === relationName(inv.sales_representative));
           const rate = rep ? Number(rep.commission_rate) / 100 : 0.02; // 2% افتراضي
           
-          acc[repName].sales = (acc[repName].sales || 0) + Number(inv.total_amount);
-          acc[repName].commission = (acc[repName].commission || 0) + (Number(inv.total_amount) * rate);
+          acc[repName].sales = (acc[repName].sales || 0) + numericValue(inv.total_amount);
+          acc[repName].commission = (acc[repName].commission || 0) + (numericValue(inv.total_amount) * rate);
           return acc;
         }, {});
         
