@@ -172,8 +172,7 @@ const ReadyReports = () => {
         paginate: false,
         filters: {
           date_from: dateFrom,
-          date_to: dateTo,
-          customer_id: selectedUser === 'all' ? undefined : selectedUser
+          date_to: dateTo
         }
       });
       return extractApiArray(response);
@@ -206,8 +205,7 @@ const ReadyReports = () => {
         paginate: false,
         filters: {
           date_from: dateFrom,
-          date_to: dateTo,
-          supplier_id: selectedUser === 'all' ? undefined : selectedUser
+          date_to: dateTo
         }
       });
       return extractApiArray(response);
@@ -262,6 +260,7 @@ const ReadyReports = () => {
     queryKey: ['attendance', dateFrom, dateTo],
     queryFn: async () => {
       const response = await api.post('/attendance/index', {
+        paginate: false,
         date_from: dateFrom,
         date_to: dateTo
       });
@@ -302,8 +301,11 @@ const ReadyReports = () => {
     queryKey: ['return-invoices', dateFrom, dateTo],
     queryFn: async () => {
       const response = await api.post('/return-invoices/index', {
-        date_from: dateFrom,
-        date_to: dateTo
+        paginate: false,
+        filters: {
+          date_from: dateFrom,
+          date_to: dateTo
+        }
       });
       return extractApiArray(response);
     }
@@ -800,7 +802,7 @@ checkOut: 'تسجيل الخروج',
         return {
           headers: [t.date, t.returnNo, t.invoiceNo, t.amount, t.reason],
           rows: purchaseReturns.map((ret) => [
-            formatReportDate(ret.created_at),
+            formatReportDate(ret.return_date || ret.created_at),
             ret.return_number,
             ret.invoice_number,
             formatCurrency(numericValue(ret.total_amount)),
