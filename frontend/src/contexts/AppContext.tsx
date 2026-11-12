@@ -48,6 +48,11 @@ interface UserProfile {
   warehouse_id: string | null;
 }
 
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+const isSupabaseUserId = (id: unknown): id is string =>
+  typeof id === 'string' && UUID_PATTERN.test(id);
+
 interface CartItem {
   id: string;
   productId: string;
@@ -194,8 +199,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         
         setBranches(branchesData || []);
         
-        // Load user profile with branch and warehouse
-        if (user) {
+        // The Laravel admin API returns numeric IDs (for example, 9). Those
+        // IDs must never be sent to Supabase UUID columns.
+        if (user && isSupabaseUserId(user.id)) {
           const { data: profileData } = await supabase
             .from('profiles')
             .select('id, full_name, full_name_ar, email, branch_id, warehouse_id')
@@ -282,15 +288,22 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
       
       try {
-        // Get user role from user_roles table
-        // Note: This role is verified server-side by RLS policies for all operations
-        const { data: roleData } = await supabase
-          .from('user_roles')
-          .select('role')
-          .eq('user_id', user.id)
-          .single();
-        
-        const role = roleData?.role as 'admin' | 'moderator' | 'cashier' | 'viewer' | null;
+        // Laravel Admin/Employee accounts use numeric IDs and provide the role
+        // directly in the API response. Only Supabase-authenticated users have
+        // a UUID that can safely be used with user_roles.user_id.
+        let role = (typeof user.role === 'string' ? user.role.toLowerCase() : '') as
+          'admin' | 'moderator' | 'cashier' | 'viewer' | '';
+
+        if (isSupabaseUserId(user.id)) {
+          const { data: roleData, error: roleError } = await supabase
+            .from('user_roles')
+            .select('role')
+            .eq('user_id', user.id)
+            .maybeSingle();
+
+          if (roleError) throw roleError;
+          role = (roleData?.role || '') as 'admin' | 'moderator' | 'cashier' | 'viewer' | '';
+        }
         
         // Set permissions based on role (for UI control only)
         const rolePermissions: Record<string, UserPermissions> = {
@@ -356,7 +369,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           },
         };
         
-        setPermissions(role ? rolePermissions[role] : defaultPermissions);
+        setPermissions(role && rolePermissions[role] ? rolePermissions[role] : defaultPermissions);
       } catch (error) {
         console.error('Error loading permissions:', error);
         setPermissions(defaultPermissions);
